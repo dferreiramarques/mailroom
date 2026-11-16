@@ -11,6 +11,7 @@ import Anthropic from '@anthropic-ai/sdk';
 
 export const PRESETS = {
   anthropic: { label: 'Anthropic (Claude)', provider: 'anthropic', baseURL: '', model: 'claude-sonnet-5-5' },
+  groq: { label: 'Groq (plano grátis disponível)', provider: 'openai', baseURL: 'https://api.groq.com/openai/v1', model: '' },
   openai: { label: 'OpenAI', provider: 'openai', baseURL: 'https://api.openai.com/v1', model: '' },
   openrouter: { label: 'OpenRouter', provider: 'openai', baseURL: 'https://openrouter.ai/api/v1', model: '' },
   gemini: { label: 'Google Gemini (compatível OpenAI)', provider: 'openai', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '' },

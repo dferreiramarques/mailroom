@@ -36,6 +36,7 @@ npm run demo        # http://localhost:4321 — caixa fictícia, IA simulada
 | Fornecedor | Notas |
 |---|---|
 | Anthropic (Claude) | só a chave; modelo por omissão `claude-sonnet-5-5` |
+| Groq | chave grátis em console.groq.com, sem cartão; copia o nome do modelo da consola |
 | OpenAI | chave + modelo |
 | OpenRouter | chave + modelo; dá acesso a muitos modelos com uma só chave |
 | Google Gemini | usa o endpoint compatível com OpenAI; chave do Google AI Studio |
