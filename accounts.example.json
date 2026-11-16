@@ -1,0 +1,26 @@
+[
+  {
+    "id": "monco",
+    "label": "monco.io",
+    "address": "david@monco.io",
+    "fromName": "David Ferreira Marques",
+    "color": "#2f6f4f",
+    "signature": "David Ferreira Marques\nmonco.io",
+    "imap": { "host": "imap.gmail.com", "port": 993, "secure": true, "user": "dferreiramarques@gmail.com", "pass": "APP_PASSWORD_GMAIL" },
+    "smtp": { "host": "smtp.gmail.com", "port": 465, "secure": true, "user": "dferreiramarques@gmail.com", "pass": "APP_PASSWORD_GMAIL" },
+    "filterTo": "monco.io",
+    "filterFrom": "monco.io",
+    "appendSent": false
+  },
+  {
+    "id": "bitnik",
+    "label": "bitnik.games",
+    "address": "david@bitnik.games",
+    "fromName": "David · bitnikgames",
+    "color": "#c2571a",
+    "signature": "David Ferreira Marques\nbitnikgames — bitnik.games",
+    "imap": { "host": "imap.SEU-SERVIDOR.com", "port": 993, "secure": true, "user": "david@bitnik.games", "pass": "PALAVRA_PASSE" },
+    "smtp": { "host": "smtp.SEU-SERVIDOR.com", "port": 465, "secure": true, "user": "david@bitnik.games", "pass": "PALAVRA_PASSE" },
+    "appendSent": true
+  }
+]
