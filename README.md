@@ -18,17 +18,21 @@ Também tem **triagem**, **pitch** (e-mails personalizados em lote), **publicaç
 
 **Nada é enviado sem ti.** A IA só cria rascunhos. Enviar pede sempre dois cliques, e o envio em lote só manda rascunhos marcados como revistos.
 
-## Instalar (executável)
+## Instalar (Windows)
 
-Descarrega o executável da [última versão](https://github.com/dferreiramarques/mailroom/releases/latest) e abre-o. Não precisa de Node nem de instalação.
+Descarrega o `mailroom-setup-X.Y.Z.exe` da [última versão](https://github.com/dferreiramarques/mailroom/releases/latest) e corre-o. Instala só para o teu utilizador, sem pedir permissões de administrador.
 
-- Abre o browser em `http://localhost:4321`. Deixa a janela preta aberta enquanto usas a app; fecha-a para sair.
+- A app abre na sua própria janela e fica na bandeja do sistema: fechar a janela não a encerra, para continuar a avisar de correio novo. Para sair, usa *Sair* no menu da bandeja, onde também podes ligar *Abrir ao iniciar o computador*.
 - Em **Definições** adicionas as contas de correio e o fornecedor de IA. Sem contas, mostra uma caixa de demonstração.
-- Contas, rascunhos e definições ficam em `%APPDATA%\mailroom` (Windows) ou `~/.config/mailroom` (Linux), só no teu computador.
-- **Atualizações**: ao abrir, a app consulta as Releases deste repositório. Se houver versão nova, aparece *Atualizar para vX* na barra lateral; um clique descarrega e substitui o executável, e basta reabrir.
-- O executável não é assinado: no Windows, o SmartScreen pode avisar na primeira vez (*Mais informações → Executar mesmo assim*).
+- Contas, rascunhos e definições ficam em `%APPDATA%\mailroom`, só no teu computador.
+- **Atualizações**: a app consulta as Releases deste repositório. Havendo versão nova, aparece *Atualizar para vX* na barra lateral; um clique descarrega, instala e reinicia.
+- O instalador não é assinado: o SmartScreen pode avisar na primeira vez (*Mais informações → Executar mesmo assim*).
 
-Para gerar os executáveis: `npm run build` (Windows) ou `npm run build:all`. Para publicar uma versão: muda a `version` no `package.json`, faz commit e `git tag vX.Y.Z && git push --tags`; o GitHub Actions cria a Release.
+Por dentro, a app de desktop corre o mesmo servidor numa porta local aleatória, acessível só à própria janela (cada arranque gera um token).
+
+**Publicar uma versão:** muda a `version` no `package.json`, faz commit e push; depois, em *Actions → release → Run workflow* (ou publicando uma tag `vX.Y.Z`), o GitHub gera o instalador e cria a Release.
+
+Para desenvolvimento: `npm run app` abre a app de desktop a partir do código.
 
 ## Experimentar já
 
@@ -112,7 +116,8 @@ node examples/bitnik-platform.js   # http://127.0.0.1:4400/studio
 ## Estrutura
 
 ```
-server.js                    app autónoma (usa o core)
+electron/main.js             app de desktop: janela, bandeja, avisos, atualizações
+server.js                    servidor (sozinho com `npm start`, ou dentro da app de desktop)
 public/index.html            página que só embebe <mail-room>
 core/index.js                createMailModule(): API, tópicos, rascunhos, IA, agente
 core/lib/threads.js          agrupamento em tópicos (Message-ID, assunto, pessoa) e histórico

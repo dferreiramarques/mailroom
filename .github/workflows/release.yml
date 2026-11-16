@@ -1,19 +1,21 @@
-# Cria uma Release com os executáveis sempre que se publica uma tag vX.Y.Z.
+# Gera o instalador de Windows e publica-o numa Release.
+# Dispara ao publicar uma tag vX.Y.Z, ou à mão em Actions → release → Run workflow
+# (nesse caso a Release é criada com a versão do package.json).
 name: release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: npm run build:all
-      - run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes || gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+      - run: npx electron-builder --win nsis --publish always
         env:
           GH_TOKEN: ${{ github.token }}

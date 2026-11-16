@@ -1019,8 +1019,8 @@ function mount(root, host, base) {
     btn.disabled = true; btn.innerHTML = spin('A descarregar…');
     try {
       const r = await api('/api/update/apply', { method: 'POST' });
-      btn.textContent = `v${r.version} instalada — fecha e volta a abrir`;
-      toast('Atualização instalada. Fecha o mailroom e abre-o outra vez.');
+      btn.textContent = r.restart === 'auto' ? `A instalar v${r.version}…` : `v${r.version} instalada — fecha e volta a abrir`;
+      toast(r.restart === 'auto' ? 'A instalar. O mailroom reinicia sozinho.' : 'Atualização instalada. Fecha o mailroom e abre-o outra vez.');
     } catch (e) { btn.disabled = false; btn.textContent = 'Atualização falhou — abrir página'; state.update.canApply = false; toast('Erro: ' + e.message); }
   }
   $('#updateBtn').onclick = (e) => applyUpdate(e.currentTarget);
