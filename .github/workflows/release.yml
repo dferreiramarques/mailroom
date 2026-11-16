@@ -16,6 +16,12 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: npx electron-builder --win nsis --publish always
+      - run: npx electron-builder --win nsis --publish never
+      # Cria a Release (se ainda não existir) e anexa instalador, blockmap e latest.yml (usado pelas atualizações).
+      - shell: bash
+        run: |
+          V="v$(node -p "require('./package.json').version")"
+          gh release view "$V" >/dev/null 2>&1 || gh release create "$V" --target "$GITHUB_SHA" --title "$V" --generate-notes
+          gh release upload "$V" release/*.exe release/*.blockmap release/latest.yml --clobber
         env:
           GH_TOKEN: ${{ github.token }}
