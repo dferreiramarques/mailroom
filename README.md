@@ -24,7 +24,7 @@ Descarrega o executável da [última versão](https://github.com/dferreiramarque
 
 - Abre o browser em `http://localhost:4321`. Deixa a janela preta aberta enquanto usas a app; fecha-a para sair.
 - Em **Definições** adicionas as contas de correio e o fornecedor de IA. Sem contas, mostra uma caixa de demonstração.
-- Contas, rascunhos e definições ficam em `%APPDATA%\\mailroom` (Windows) ou `~/.config/mailroom` (Linux), só no teu computador.
+- Contas, rascunhos e definições ficam em `%APPDATA%\mailroom` (Windows) ou `~/.config/mailroom` (Linux), só no teu computador.
 - **Atualizações**: ao abrir, a app consulta as Releases deste repositório. Se houver versão nova, aparece *Atualizar para vX* na barra lateral; um clique descarrega e substitui o executável, e basta reabrir.
 - O executável não é assinado: no Windows, o SmartScreen pode avisar na primeira vez (*Mais informações → Executar mesmo assim*).
 
