@@ -130,7 +130,7 @@ Devolve [{"format": "id", "subject": "assunto ou título, ou null", "body": "tex
 
   async function test() {
     const p = await provider();
-    if (!p) return { ok: false, error: 'Fornecedor incompleto: falta chave, modelo ou URL.' };
+    if (!p) { const c = await getConfig(); return { ok: false, error: !c.provider ? 'Escolhe um fornecedor.' : c.provider !== 'anthropic' && !c.model ? 'Falta o nome do modelo.' : 'Falta a chave ou o URL da API.' }; }
     const t0 = Date.now();
     const r = await p.chat({ system: 'Responde só com a palavra: ok', messages: [{ role: 'user', text: 'teste' }], maxTokens: 10 });
     return { ok: true, model: p.model, ms: Date.now() - t0, reply: r.text.trim().slice(0, 40) };

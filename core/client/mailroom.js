@@ -75,6 +75,11 @@ function mount(root, host, base) {
   const $$ = (s, el = root) => [...el.querySelectorAll(s)];
   const app = () => $('.app');
 
+  // Tema: o atributo `theme` do anfitrião manda; senão, a escolha do utilizador (claro por omissão).
+  const hostTheme = host.getAttribute('theme');
+  const applyTheme = (t) => { if (hostTheme) return; if (t === 'auto') host.removeAttribute('theme'); else host.setAttribute('theme', t); };
+  applyTheme(ls.get('mailroom.theme') || 'light');
+
   const state = {
     status: null, account: host.getAttribute('account') || 'all', folder: 'INBOX', view: 'topics',
     mode: host.getAttribute('mode') || ls.get('mailroom.mode') || 'topics',
@@ -858,7 +863,7 @@ function mount(root, host, base) {
       <form id="aiForm">
         <div class="row">
           <div class="field"><label for="aiPreset">Fornecedor</label><select id="aiPreset" name="preset"><option value="">— nenhum (simulado) —</option>${presetOpts}</select></div>
-          <div class="field"><label for="aiModel">Modelo</label><input id="aiModel" name="model" value="${esc(a.model)}" placeholder="ex.: claude-sonnet-5-5, gpt-…, gemini-…, llama3" /></div>
+          <div class="field"><label for="aiModel">Modelo</label><input id="aiModel" name="model" list="aiModels" value="${esc(a.model)}" placeholder="escolhe da lista ou escreve o nome" autocomplete="off" /><datalist id="aiModels"></datalist></div>
         </div>
         <div class="field" id="baseField"><label for="aiBase">URL da API</label><input id="aiBase" name="baseURL" value="${esc(a.baseURL)}" placeholder="https://…/v1" /></div>
         <div class="field"><label for="aiKey">Chave da API</label><input id="aiKey" name="apiKey" type="password" autocomplete="off" placeholder="${a.hasKey ? `guardada (${esc(a.keyHint)}, origem: ${esc(a.keySource)}) — escreve para substituir` : 'cola aqui a chave'}" /></div>
@@ -866,6 +871,9 @@ function mount(root, host, base) {
         <div id="aiStatus" class="status-line ${a.enabled ? 'ok' : ''}">${a.enabled ? `Ativo${a.model ? ` · ${esc(a.model)}` : ''}` : 'Sem fornecedor: as funções de IA estão em modo simulado.'}</div>
         <div class="actions"><button class="btn primary">Guardar</button><button class="btn" type="button" id="aiTest">Testar ligação</button></div>
       </form>`}
+
+      ${hostTheme ? '' : `<h2>Aparência</h2>
+      <div class="field" style="max-width:260px"><label for="pTheme">Tema</label><select id="pTheme"><option value="light">Claro</option><option value="dark">Escuro</option><option value="auto">Igual ao sistema</option></select></div>`}
 
       <h2>Comportamento</h2>
       <label class="toggle"><input type="checkbox" id="pTopics" ${s.prefs.autoTopics ? 'checked' : ''}/> Resumir tópicos automaticamente ao abrir</label>
@@ -895,6 +903,8 @@ function mount(root, host, base) {
       state.status.prefs = r.prefs; toast('Guardado');
     };
     $('#pTopics').onchange = savePrefs; $('#pSuggest').onchange = savePrefs;
+    const th = $('#pTheme');
+    if (th) { th.value = ls.get('mailroom.theme') || 'light'; th.onchange = () => { ls.set('mailroom.theme', th.value); applyTheme(th.value); }; }
 
     const f = $('#aiForm'); if (!f) return;
     const syncPreset = (apply) => {
@@ -904,6 +914,9 @@ function mount(root, host, base) {
     };
     syncPreset(false);
     f.preset.onchange = () => syncPreset(true);
+    // Modelos disponíveis no fornecedor guardado (precisa da chave já guardada).
+    const loadModels = async () => { try { const r = await api('/api/ai-settings/models'); $('#aiModels').innerHTML = r.models.map((m) => `<option value="${esc(m)}"></option>`).join(''); } catch {} };
+    loadModels();
     const status = (cls, text) => { const el = $('#aiStatus'); el.className = `status-line ${cls}`; el.textContent = text; };
     const save = async (extra = {}) => {
       const p = a.presets[f.preset.value];
@@ -912,7 +925,8 @@ function mount(root, host, base) {
       f.apiKey.placeholder = r.hasKey ? `guardada (${r.keyHint}, origem: ${r.keySource}) — escreve para substituir` : 'cola aqui a chave';
       state.status = await api('/api/status'); renderBadge();
       state.topics.forEach((t) => (t.ai = null));
-      status(r.enabled ? 'ok' : '', r.enabled ? `Guardado · ativo${r.model ? ` · ${r.model}` : ''}` : 'Guardado, mas incompleto: falta chave, modelo ou URL.');
+      status(r.enabled ? 'ok' : 'err', r.enabled ? `Guardado · ativo${r.model ? ` · ${r.model}` : ''}` : `Guardado, mas falta ${!r.hasKey && !/localhost|127\.0\.0\.1/.test(r.baseURL) ? 'a chave' : !r.model ? 'o nome do modelo' : 'o URL da API'}.`);
+      loadModels();
       return r;
     };
     f.onsubmit = async (e) => { e.preventDefault(); try { await save(); } catch (err) { status('err', err.message); } };

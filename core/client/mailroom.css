@@ -15,7 +15,7 @@
   background: var(--bg);
 }
 @media (prefers-color-scheme: dark) {
-  :host(:not([theme=light])) { --bg: #161615; --panel: #1c1c1a; --ink: #ecebe7; --muted: #8f8b83; --line: #2c2b28; --soft: #242320; --accent: #ecebe7; }
+  :host(:not([theme])) { --bg: #161615; --panel: #1c1c1a; --ink: #ecebe7; --muted: #8f8b83; --line: #2c2b28; --soft: #242320; --accent: #ecebe7; }
 }
 * { box-sizing: border-box; }
 :host { display: block; height: 100%; min-height: 480px; container-type: inline-size; }
@@ -239,3 +239,4 @@ button { cursor: pointer; }
 
 .nav.update { color: var(--focus); font-weight: 600; font-size: 13px; }
 code { font: 12px ui-monospace, monospace; background: var(--soft); padding: 1px 5px; border-radius: 4px; }
+a { color: var(--focus); }

@@ -11,7 +11,7 @@ import Anthropic from '@anthropic-ai/sdk';
 
 export const PRESETS = {
   anthropic: { label: 'Anthropic (Claude)', provider: 'anthropic', baseURL: '', model: 'claude-sonnet-5-5' },
-  groq: { label: 'Groq (plano grátis disponível)', provider: 'openai', baseURL: 'https://api.groq.com/openai/v1', model: '' },
+  groq: { label: 'Groq (plano grátis disponível)', provider: 'openai', baseURL: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b' },
   openai: { label: 'OpenAI', provider: 'openai', baseURL: 'https://api.openai.com/v1', model: '' },
   openrouter: { label: 'OpenRouter', provider: 'openai', baseURL: 'https://openrouter.ai/api/v1', model: '' },
   gemini: { label: 'Google Gemini (compatível OpenAI)', provider: 'openai', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '' },
@@ -99,3 +99,12 @@ function openaiProvider(cfg) {
   };
 }
 function safeJson(s) { try { return typeof s === 'string' ? JSON.parse(s || '{}') : s || {}; } catch { return {}; } }
+
+// Lista de modelos do fornecedor (APIs compatíveis com OpenAI expõem GET /models).
+export async function listModels(cfg) {
+  if (cfg?.provider !== 'openai' || !cfg.baseURL) return [];
+  const res = await fetch(`${cfg.baseURL.replace(/\/$/, '')}/models`, { headers: cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}, signal: AbortSignal.timeout(8000) });
+  if (!res.ok) return [];
+  const data = await res.json().catch(() => ({}));
+  return (data.data || data.models || []).map((m) => m.id || m.name).filter((id) => id && !/whisper|guard|tts|embed|safeguard/i.test(id)).sort();
+}

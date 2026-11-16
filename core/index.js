@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import * as mail from './lib/mail.js';
 import * as demo from './lib/demo.js';
 import { createAI } from './lib/ai.js';
-import { PRESETS } from './lib/providers.js';
+import { PRESETS, listModels } from './lib/providers.js';
 import { buildTopics } from './lib/threads.js';
 import { memoryStore, fileStore } from './lib/stores.js';
 
@@ -245,6 +245,7 @@ export function createMailModule(opts = {}) {
     summaryCache.clear();
     return aiPublic();
   }));
+  router.get('/api/ai-settings/models', h(async () => { try { return { models: await listModels(await aiConfig()) }; } catch { return { models: [] }; } }));
   router.post('/api/ai-settings/test', h(async () => {
     try { return await ai.test(); } catch (e) { return { ok: false, error: e.message }; }
   }));
