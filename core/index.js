@@ -9,6 +9,7 @@
 //   <mail-room api="/mail"></mail-room>
 import express from 'express';
 import path from 'node:path';
+import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import * as mail from './lib/mail.js';
@@ -40,8 +41,11 @@ export const DEFAULT_SETTINGS = {
  * @param {Function} [opts.onSend]      callback(account, { to, subject }) após cada envio.
  */
 export function createMailModule(opts = {}) {
-  const DEMO = Boolean(opts.demo);
-  const accounts = DEMO ? demo.demoAccounts : opts.accounts || [];
+  // Contas reais (mutáveis quando opts.onAccountsChange existe) e modo demo dinâmico.
+  let userAccounts = [...(opts.accounts || [])];
+  const isDemo = () => Boolean(opts.demo) || (Boolean(opts.demoWhenEmpty) && userAccounts.length === 0);
+  const accs = () => (isDemo() ? demo.demoAccounts : userAccounts);
+  const editable = typeof opts.onAccountsChange === 'function';
   const store = opts.store || memoryStore();
   const defaults = { ...DEFAULT_SETTINGS, ...(opts.settings || {}) };
   // compatibilidade com a opção antiga `anthropic: { apiKey, model }`
@@ -58,7 +62,7 @@ export function createMailModule(opts = {}) {
   const ai = createAI(aiConfig);
 
   const accById = (id) => {
-    const a = accounts.find((x) => x.id === id);
+    const a = accs().find((x) => x.id === id);
     if (!a) throw Object.assign(new Error(`Conta desconhecida: ${id}`), { status: 400 });
     return a;
   };
@@ -67,21 +71,21 @@ export function createMailModule(opts = {}) {
   const editDrafts = (fn) => (chain = chain.then(async () => { const d = await store.getDrafts(); const r = await fn(d); await store.setDrafts(r.drafts); return r.value; }));
   const addDrafts = (list) => editDrafts((d) => ({ drafts: [...list, ...d], value: list }));
 
-  const io = DEMO
-    ? {
+  const fake = {
         list: async (acc, o) => demo.demoList(acc.id, o),
         get: async (acc, uid, folder) => demo.demoGet(acc.id, uid, folder),
         many: async (acc, refs) => refs.map((r) => demo.demoGet(acc.id, r.uid, r.folder)),
         seen: async (acc, uid, folder, on) => demo.demoSeen(acc.id, uid, on),
         send: async (acc, m) => { console.log('[demo] enviaria:', m.to, m.subject); return { messageId: 'demo' }; },
-      }
-    : {
+      };
+  const real = {
         list: (acc, o) => mail.listMessages(acc, o),
         get: (acc, uid, folder) => mail.getMessage(acc, uid, folder),
         many: (acc, refs) => mail.getMany(acc, refs),
         seen: (acc, uid, folder, on) => mail.setFlag(acc, uid, folder, '\\Seen', on),
         send: (acc, m) => mail.sendMail(acc, m),
       };
+  const io = Object.fromEntries(['list', 'get', 'many', 'seen', 'send'].map((k) => [k, (...a) => (isDemo() ? fake : real)[k](...a)]));
 
   // Caches de tópicos e resumos (memória, por instância).
   const topicIndex = new Map(); // id -> topic
@@ -92,20 +96,21 @@ export function createMailModule(opts = {}) {
   router.use(express.json({ limit: '2mb' }));
   if (opts.auth) router.use(opts.auth);
 
-  router.get('/client.js', (req, res) => res.type('js').sendFile(path.join(CLIENT_DIR, 'mailroom.js')));
-  router.get('/client.css', (req, res) => res.type('css').sendFile(path.join(CLIENT_DIR, 'mailroom.css')));
+  const asset = (f) => fs.readFileSync(path.join(CLIENT_DIR, f), 'utf8');
+  router.get('/client.js', (req, res) => res.type('js').send(asset('mailroom.js')));
+  router.get('/client.css', (req, res) => res.type('css').send(asset('mailroom.css')));
 
   const h = (fn) => async (req, res) => {
     try { res.json(await fn(req, res)); }
     catch (e) { console.error('[mailroom]', e.message); res.status(e.status || 500).json({ error: e.message }); }
   };
-  const targetsOf = (account) => (!account || account === 'all' ? accounts : [accById(account)]);
+  const targetsOf = (account) => (!account || account === 'all' ? accs() : [accById(account)]);
 
   router.get('/api/status', h(async () => {
     const cfg = await aiConfig();
     return {
-      demo: DEMO, ai: await ai.enabled(), aiModel: cfg.model || (cfg.provider === 'anthropic' ? PRESETS.anthropic.model : ''),
-      accounts: accounts.map(({ id, label, address, color }) => ({ id, label, address, color })),
+      demo: isDemo(), ai: await ai.enabled(), accountsEditable: editable, version: opts.version || '', aiModel: cfg.model || (cfg.provider === 'anthropic' ? PRESETS.anthropic.model : ''),
+      accounts: accs().map(({ id, label, address, color }) => ({ id, label, address, color })),
       formats: ai.publishFormats, prefs: await prefs(),
     };
   }));
@@ -114,7 +119,7 @@ export function createMailModule(opts = {}) {
   router.get('/api/messages', h(async (req) => {
     const { account = 'all', folder = 'INBOX', q = '', limit = 40 } = req.query;
     const targets = targetsOf(account);
-    if (req.query.fresh && !DEMO) targets.forEach((a) => mail.invalidateAccount(a));
+    if (req.query.fresh && !isDemo()) targets.forEach((a) => mail.invalidateAccount(a));
     const lists = await Promise.allSettled(targets.map((a) => io.list(a, { folder, query: q, limit: Number(limit) })));
     const errors = [];
     const items = lists.flatMap((r, i) => (r.status === 'fulfilled' ? r.value : (errors.push(`${targets[i].label}: ${r.reason.message}`), [])));
@@ -149,7 +154,7 @@ export function createMailModule(opts = {}) {
   router.get('/api/topics', h(async (req) => {
     const { account = 'all', q = '' } = req.query;
     const targets = targetsOf(account);
-    if (req.query.fresh && !DEMO) targets.forEach((a) => mail.invalidateAccount(a));
+    if (req.query.fresh && !isDemo()) targets.forEach((a) => mail.invalidateAccount(a));
     const errors = [];
     const load = async (a, folder) => io.list(a, { folder, query: q, limit: 60 }).catch((e) => (errors.push(`${a.label}: ${e.message}`), []));
     const [inbox, sent] = await Promise.all(['INBOX', 'Sent'].map(async (f) => (await Promise.all(targets.map((a) => load(a, f)))).flat()));
@@ -316,7 +321,7 @@ export function createMailModule(opts = {}) {
       },
     };
     try {
-      const r = await ai.runAgent(await getSettings(), req.body.goal || '', { accounts, tools, onStep: (s) => send({ type: 'step', ...s }) });
+      const r = await ai.runAgent(await getSettings(), req.body.goal || '', { accounts: accs(), tools, onStep: (s) => send({ type: 'step', ...s }) });
       send({ type: 'done', summary: r.summary, drafts: created });
     } catch (e) {
       console.error('[mailroom agent]', e);
@@ -325,5 +330,62 @@ export function createMailModule(opts = {}) {
     res.end();
   });
 
-  return { router, ai, accounts, store };
+  // ---------- contas (só quando a app anfitriã permite editar) ----------
+  const publicAccount = (a) => ({
+    id: a.id, label: a.label, address: a.address, color: a.color, fromName: a.fromName || '', signature: a.signature || '',
+    imap: { host: a.imap?.host, port: a.imap?.port, user: a.imap?.user }, smtp: { host: a.smtp?.host, port: a.smtp?.port, user: a.smtp?.user },
+    filterTo: a.filterTo || '', appendSent: Boolean(a.appendSent),
+  });
+  const PALETTE = ['#2f6f4f', '#c2571a', '#3b6fd8', '#8a4fb0', '#b0892f', '#2f8a8a'];
+  router.get('/api/accounts', h(() => ({ editable, accounts: userAccounts.map(publicAccount) })));
+  if (editable) {
+    const changed = async () => { topicIndex.clear(); summaryCache.clear(); await opts.onAccountsChange(userAccounts); };
+    router.post('/api/accounts', h(async (req) => {
+      const b = req.body || {};
+      const address = String(b.address || '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) throw Object.assign(new Error('Endereço de e-mail inválido'), { status: 400 });
+      const label = String(b.label || address.split('@')[1]).trim();
+      const id = b.id || label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'conta';
+      const prev = userAccounts.find((a) => a.id === id);
+      const pass = String(b.pass || '').trim() || prev?.imap?.pass;
+      const user = String(b.user || address).trim();
+      if (!pass) throw Object.assign(new Error('Falta a palavra-passe'), { status: 400 });
+      const gmail = b.kind === 'gmail';
+      const domain = address.split('@')[1];
+      const acc = {
+        id, label, address, fromName: String(b.fromName || '').trim() || undefined, signature: String(b.signature || '') || undefined,
+        color: prev?.color || PALETTE[userAccounts.length % PALETTE.length],
+        imap: gmail ? { host: 'imap.gmail.com', port: 993, secure: true, user, pass: pass.replace(/\s+/g, '') }
+          : { host: String(b.imapHost || '').trim(), port: Number(b.imapPort) || 993, secure: true, user, pass },
+        smtp: gmail ? { host: 'smtp.gmail.com', port: 465, secure: true, user, pass: pass.replace(/\s+/g, '') }
+          : { host: String(b.smtpHost || '').trim(), port: Number(b.smtpPort) || 465, secure: (Number(b.smtpPort) || 465) === 465, user, pass },
+        // Gmail com domínio próprio: mostra só o correio desse domínio.
+        ...(gmail && !/^(gmail|googlemail)\.com$/.test(domain) ? { filterTo: domain, filterFrom: domain } : {}),
+        appendSent: !gmail,
+      };
+      if (!acc.imap.host || !acc.smtp.host) throw Object.assign(new Error('Faltam os servidores IMAP/SMTP'), { status: 400 });
+      // Testa a ligação antes de guardar, para o erro aparecer já.
+      let test = { ok: true };
+      try { mail.invalidateAccount(acc); await mail.listMessages(acc, { folder: 'INBOX', limit: 1 }); }
+      catch (e) { test = { ok: false, error: e.responseText || e.message }; }
+      if (!test.ok && !b.saveAnyway) return { saved: false, test };
+      userAccounts = prev ? userAccounts.map((a) => (a.id === id ? acc : a)) : [...userAccounts, acc];
+      await changed();
+      return { saved: true, test, account: publicAccount(acc) };
+    }));
+    router.delete('/api/accounts/:id', h(async (req) => {
+      userAccounts = userAccounts.filter((a) => a.id !== req.params.id);
+      await changed();
+      return { ok: true };
+    }));
+  }
+
+  // ---------- atualizações (fornecidas pela app anfitriã) ----------
+  router.get('/api/update', h(async (req) => (opts.update ? opts.update.check(Boolean(req.query.fresh)) : { available: false })));
+  router.post('/api/update/apply', h(async () => {
+    if (!opts.update) throw Object.assign(new Error('Sem atualizador'), { status: 404 });
+    return opts.update.apply();
+  }));
+
+  return { router, ai, get accounts() { return accs(); }, isDemo, store };
 }

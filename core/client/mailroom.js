@@ -53,6 +53,7 @@ const SHELL = `
       <button class="nav" data-view="agent">Agente</button>
     </div>
     <div class="rail-foot">
+      <button class="nav update" id="updateBtn" hidden></button>
       <button class="nav" data-view="settings">Definições</button>
       <div id="modeBadge" class="mode"></div>
     </div>
@@ -113,7 +114,7 @@ function mount(root, host, base) {
   }
   function renderBadge() {
     const s = state.status;
-    $('#modeBadge').textContent = [s.demo ? 'Modo demo' : null, s.ai ? `IA: ${s.aiModel || 'ativa'}` : 'IA simulada'].filter(Boolean).join(' · ');
+    $('#modeBadge').textContent = [s.version ? `v${s.version}` : null, s.demo ? 'Modo demo' : null, s.ai ? `IA: ${s.aiModel || 'ativa'}` : 'IA simulada'].filter(Boolean).join(' · ');
   }
   function highlightNav() {
     $$('.nav').forEach((b) => {
@@ -140,7 +141,7 @@ function mount(root, host, base) {
     const sw = e.target.closest('.switch button');
     if (sw) return setMode(sw.dataset.mode);
     const b = e.target.closest('.nav');
-    if (!b) return;
+    if (!b || b.id === 'updateBtn') return;
     if (b.dataset.account) {
       state.account = b.dataset.account;
       if (state.mode === 'topics') { closeFocus(); state.view = 'topics'; loadTopics(); }
@@ -879,10 +880,14 @@ function mount(root, host, base) {
         <div class="actions"><button class="btn primary">Guardar</button></div>
       </form>
 
-      <h2>Contas</h2>
-      ${state.status.accounts.map((x) => `<div class="card">${dot(x.id)} <b>${esc(x.label)}</b> <span class="muted">${esc(x.address)}</span></div>`).join('')}
-      <p class="hint">As contas configuram-se no servidor (accounts.json ou na plataforma onde o mailroom está integrado).</p>
+      <h2 id="accountsTitle">Contas</h2>
+      <div id="accountsBox"></div>
+
+      <h2>Versão</h2>
+      <div id="versionBox" class="muted">${spin('A verificar atualizações…')}</div>
     </div>`;
+    renderAccounts();
+    renderVersion(true);
 
     $('#setForm').onsubmit = async (e) => { e.preventDefault(); await api('/api/settings', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) }); toast('Guardado'); };
     const savePrefs = async () => {
@@ -920,6 +925,101 @@ function mount(root, host, base) {
       } catch (err) { status('err', err.message); }
     };
     $('#forgetKey')?.addEventListener('click', async (e) => { e.preventDefault(); await save({ clearKey: true }); toast('Chave apagada'); viewSettings(); });
+  }
+
+  // ---------- contas ----------
+  async function renderAccounts() {
+    const box = $('#accountsBox'); if (!box) return;
+    const r = await api('/api/accounts');
+    const list = r.accounts.map((x) => `<div class="card"><div class="c-head" style="margin:0"><span><span class="dot" style="display:inline-block;background:${esc(x.color)}"></span> <b style="color:var(--ink)">${esc(x.label)}</b> ${esc(x.address)} · ${esc(x.imap.host || '')}${x.filterTo ? ` · só correio para @${esc(x.filterTo)}` : ''}</span>${r.editable ? `<button class="btn danger" data-del="${esc(x.id)}">Remover</button>` : ''}</div></div>`).join('');
+    if (!r.editable) { box.innerHTML = list + `<p class="hint">As contas são geridas no servidor (ACCOUNTS_JSON ou pela plataforma onde o mailroom está integrado).</p>`; return; }
+    box.innerHTML = (list || `<p class="muted">Ainda não há contas: estás a ver a caixa de demonstração.</p>`) + `
+      <form id="accForm" class="card">
+        <div class="c-title">Adicionar conta</div>
+        <div class="row">
+          <div class="field"><label for="aKind">Tipo</label><select id="aKind" name="kind"><option value="gmail">Gmail (incl. domínio próprio reencaminhado)</option><option value="imap">Outro (IMAP/SMTP)</option></select></div>
+          <div class="field"><label for="aAddr">Endereço de e-mail</label><input id="aAddr" name="address" type="email" required placeholder="david@monco.io" /></div>
+        </div>
+        <div class="row">
+          <div class="field"><label for="aUser">Utilizador de início de sessão</label><input id="aUser" name="user" placeholder="a tua conta @gmail.com" /></div>
+          <div class="field"><label for="aPass" id="aPassLabel">Palavra-passe de app</label><input id="aPass" name="pass" type="password" autocomplete="off" required /></div>
+        </div>
+        <div class="row" id="aServers" hidden>
+          <div class="field"><label for="aImap">Servidor IMAP</label><input id="aImap" name="imapHost" placeholder="imap.exemplo.com" /></div>
+          <div class="field" style="max-width:110px"><label for="aImapP">Porta</label><input id="aImapP" name="imapPort" value="993" /></div>
+          <div class="field"><label for="aSmtp">Servidor SMTP</label><input id="aSmtp" name="smtpHost" placeholder="smtp.exemplo.com" /></div>
+          <div class="field" style="max-width:110px"><label for="aSmtpP">Porta</label><input id="aSmtpP" name="smtpPort" value="465" /></div>
+        </div>
+        <div class="row">
+          <div class="field"><label for="aName">Nome do remetente</label><input id="aName" name="fromName" placeholder="David Ferreira Marques" /></div>
+          <div class="field"><label for="aLabel">Nome da caixa</label><input id="aLabel" name="label" placeholder="monco.io" /></div>
+        </div>
+        <p class="hint" id="aHint">No Gmail usa uma palavra-passe de app (myaccount.google.com/apppasswords), não a palavra-passe normal. Com um domínio próprio, a caixa mostra só o correio desse domínio.</p>
+        <div id="accStatus" class="status-line"></div>
+        <div class="actions" style="margin:0"><button class="btn primary">Testar e guardar</button></div>
+      </form>
+      <p class="hint">As palavras-passe ficam guardadas só neste computador.</p>`;
+    const f = $('#accForm');
+    const sync = () => {
+      const gm = f.kind.value === 'gmail';
+      $('#aServers').hidden = gm; $('#aHint').hidden = !gm;
+      $('#aPassLabel').textContent = gm ? 'Palavra-passe de app' : 'Palavra-passe';
+      f.user.placeholder = gm ? 'a tua conta @gmail.com' : 'igual ao endereço, se vazio';
+    };
+    f.kind.onchange = sync; sync();
+    const st = (cls, html) => { const el = $('#accStatus'); el.className = `status-line ${cls}`; el.innerHTML = html; };
+    const submit = async (saveAnyway) => {
+      st('', spin('A testar a ligação…'));
+      try {
+        const r2 = await api('/api/accounts', { method: 'POST', body: { ...Object.fromEntries(new FormData(f)), saveAnyway } });
+        if (!r2.saved) { st('err', `Não consegui ligar: ${esc(r2.test.error)} <a href="#" id="saveAnyway">Guardar mesmo assim</a>`); $('#saveAnyway').onclick = (e) => { e.preventDefault(); submit(true); }; return; }
+        toast(r2.test.ok ? 'Conta ligada' : 'Conta guardada (sem ligação)');
+        await accountsChanged();
+      } catch (e) { st('err', esc(e.message)); }
+    };
+    f.onsubmit = (e) => { e.preventDefault(); submit(false); };
+    $$('[data-del]', box).forEach((b) => (b.onclick = async () => {
+      if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = 'Confirmar remoção'; return; }
+      await api(`/api/accounts/${encodeURIComponent(b.dataset.del)}`, { method: 'DELETE' });
+      toast('Conta removida'); await accountsChanged();
+    }));
+  }
+  async function accountsChanged() {
+    state.status = await api('/api/status');
+    state.account = 'all'; state.topics = []; state.items = []; state.threads.clear(); state.suggestions.clear(); state.open.clear();
+    renderNav(); renderAccounts();
+  }
+
+  // ---------- atualizações ----------
+  async function checkUpdate(fresh = false) {
+    try { state.update = await api(`/api/update${fresh ? '?fresh=1' : ''}`); } catch { state.update = null; }
+    const b = $('#updateBtn'), u = state.update;
+    b.hidden = !u?.available;
+    if (u?.available) b.textContent = `Atualizar para v${u.latest}`;
+    return u;
+  }
+  async function applyUpdate(btn) {
+    const u = state.update; if (!u?.available) return;
+    if (!u.canApply) { window.open(u.url, '_blank', 'noopener'); return; }
+    if (!btn.dataset.armed) { btn.dataset.armed = 1; btn.textContent = `Confirmar: instalar v${u.latest}`; setTimeout(() => { delete btn.dataset.armed; if (state.update?.available) btn.textContent = `Atualizar para v${u.latest}`; }, 5000); return; }
+    btn.disabled = true; btn.innerHTML = spin('A descarregar…');
+    try {
+      const r = await api('/api/update/apply', { method: 'POST' });
+      btn.textContent = `v${r.version} instalada — fecha e volta a abrir`;
+      toast('Atualização instalada. Fecha o mailroom e abre-o outra vez.');
+    } catch (e) { btn.disabled = false; btn.textContent = 'Atualização falhou — abrir página'; state.update.canApply = false; toast('Erro: ' + e.message); }
+  }
+  $('#updateBtn').onclick = (e) => applyUpdate(e.currentTarget);
+  async function renderVersion(fresh) {
+    const box = $('#versionBox'); if (!box) return;
+    const u = await checkUpdate(fresh);
+    if (!$('#versionBox')) return;
+    const cur = u?.current || state.status.version || '?';
+    box.innerHTML = u?.available
+      ? `<div class="card"><div class="c-title">Há uma versão nova: v${esc(u.latest)} <span class="muted">(tens a v${esc(cur)})</span></div>${u.notes ? `<div class="c-body muted" style="margin-bottom:10px">${esc(u.notes)}</div>` : ''}<div class="actions" style="margin:0"><button class="btn primary" id="updNow">${u.canApply ? 'Atualizar agora' : 'Abrir página da versão'}</button></div>${u.packaged ? '' : '<p class="hint" style="margin:10px 0 0">Instalação a partir do código: <code>git pull && npm install</code>.</p>'}</div>`
+      : `<span>mailroom v${esc(cur)} · ${u?.error ? esc(u.error) : u?.latest ? 'está atualizado' : 'ainda não há versões publicadas'}</span> <button class="btn" id="updCheck">Verificar agora</button>`;
+    $('#updNow')?.addEventListener('click', (e) => applyUpdate(e.currentTarget));
+    $('#updCheck')?.addEventListener('click', () => { box.innerHTML = spin('A verificar…'); renderVersion(true); });
   }
 
   // =====================================================================
@@ -967,6 +1067,7 @@ function mount(root, host, base) {
     if (state.mode === 'topics') loadTopics(); else { state.view = 'mail'; loadList(); $('#reader').innerHTML = `<div class="empty">Escolhe uma mensagem.<br /><span class="muted">j / k para navegar · r responder · s resumir · c nova · v mudar de vista</span></div>`; }
     highlightNav();
     emit('mail-ready', { accounts: state.status.accounts, mode: state.mode });
+    checkUpdate();
   })();
 
   return { compose, refresh: () => (state.mode === 'topics' ? loadTopics(true) : loadList(true)), openView, setMode, research };

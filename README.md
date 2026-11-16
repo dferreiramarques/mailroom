@@ -18,6 +18,18 @@ Também tem **triagem**, **pitch** (e-mails personalizados em lote), **publicaç
 
 **Nada é enviado sem ti.** A IA só cria rascunhos. Enviar pede sempre dois cliques, e o envio em lote só manda rascunhos marcados como revistos.
 
+## Instalar (executável)
+
+Descarrega o executável da [última versão](https://github.com/dferreiramarques/mailroom/releases/latest) e abre-o. Não precisa de Node nem de instalação.
+
+- Abre o browser em `http://localhost:4321`. Deixa a janela preta aberta enquanto usas a app; fecha-a para sair.
+- Em **Definições** adicionas as contas de correio e o fornecedor de IA. Sem contas, mostra uma caixa de demonstração.
+- Contas, rascunhos e definições ficam em `%APPDATA%\\mailroom` (Windows) ou `~/.config/mailroom` (Linux), só no teu computador.
+- **Atualizações**: ao abrir, a app consulta as Releases deste repositório. Se houver versão nova, aparece *Atualizar para vX* na barra lateral; um clique descarrega e substitui o executável, e basta reabrir.
+- O executável não é assinado: no Windows, o SmartScreen pode avisar na primeira vez (*Mais informações → Executar mesmo assim*).
+
+Para gerar os executáveis: `npm run build` (Windows) ou `npm run build:all`. Para publicar uma versão: muda a `version` no `package.json`, faz commit e `git tag vX.Y.Z && git push --tags`; o GitHub Actions cria a Release.
+
 ## Experimentar já
 
 ```bash
@@ -27,8 +39,8 @@ npm run demo        # http://localhost:4321 — caixa fictícia, IA simulada
 
 ## Ligar às tuas caixas
 
-1. Copia `accounts.example.json` para `accounts.json` e preenche as contas (IMAP/SMTP).
-2. `npm start`
+1. `npm start`
+2. Em **Definições → Contas**, adiciona as tuas caixas (ou copia `accounts.example.json` para `accounts.json` e preenche à mão).
 3. Em **Definições → Inteligência artificial**, escolhe o fornecedor, o modelo e a chave, e carrega em *Testar ligação*.
 
 ### Fornecedores de IA

@@ -1,11 +1,13 @@
 {
   "name": "mailroom",
-  "version": "1.0.0",
+  "version": "0.3.0",
   "description": "mailroom — correio por tópicos com assistente de IA",
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
-    "demo": "DEMO=1 node server.js"
+    "demo": "DEMO=1 node server.js",
+    "build": "node build.mjs win",
+    "build:all": "node build.mjs win linux"
   },
   "keywords": [],
   "author": "",
@@ -21,5 +23,9 @@
   "type": "module",
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.25.0",
+    "esbuild": "^0.28.2"
   }
 }

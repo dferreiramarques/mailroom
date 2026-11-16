@@ -1,36 +1,51 @@
-// mailroom — app autónoma. Usa o mesmo módulo que se integra na plataforma Bitnik.
+// mailroom — app autónoma (código-fonte ou executável). Usa o núcleo em core/.
 import 'dotenv/config';
 import express from 'express';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { exec } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createMailModule, fileStore } from './core/index.js';
+import { createUpdater } from './updater.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PACKAGED = Boolean(process.pkg);
+const REPO = 'dferreiramarques/mailroom';
+/* global __MAILROOM_VERSION__ */
+const VERSION = typeof __MAILROOM_VERSION__ !== 'undefined' ? __MAILROOM_VERSION__ : JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version;
 
-// Contas: variável ACCOUNTS_JSON (Railway e afins) ou ficheiro accounts.json (local).
+// Onde ficam contas, rascunhos e definições.
+//  - executável: pasta do utilizador (%APPDATA%\mailroom no Windows)
+//  - código-fonte: ./data · alojado: DATA_DIR (um Volume)
+const DATA_DIR = process.env.DATA_DIR
+  || (PACKAGED ? path.join(process.env.APPDATA || path.join(os.homedir(), '.config'), 'mailroom') : path.join(__dirname, 'data'));
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
+// Contas: ACCOUNTS_JSON (alojamento; só leitura) ou ficheiro (editável na app).
+const fromEnv = Boolean(process.env.ACCOUNTS_JSON);
+const legacyFile = path.join(__dirname, 'accounts.json');
+const accountsFile = !PACKAGED && fs.existsSync(legacyFile) ? legacyFile : path.join(DATA_DIR, 'accounts.json');
 function loadAccounts() {
-  if (process.env.ACCOUNTS_JSON) {
-    try { return JSON.parse(process.env.ACCOUNTS_JSON); }
-    catch (e) { console.error('ACCOUNTS_JSON não é JSON válido:', e.message); process.exit(1); }
-  }
-  const file = path.join(__dirname, 'accounts.json');
-  return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
+  try {
+    if (fromEnv) return JSON.parse(process.env.ACCOUNTS_JSON);
+    return fs.existsSync(accountsFile) ? JSON.parse(fs.readFileSync(accountsFile, 'utf8')) : [];
+  } catch (e) { console.error(`Contas inválidas (${fromEnv ? 'ACCOUNTS_JSON' : accountsFile}):`, e.message); process.exit(1); }
 }
-const accounts = loadAccounts();
-const demo = process.env.DEMO === '1' || !accounts;
-// Onde ficam rascunhos e definições. No Railway, aponta DATA_DIR para um Volume.
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 
 const mail = createMailModule({
-  demo,
-  accounts: demo ? [] : accounts,
-  // Fornecedor por omissão vindo do .env; pode ser mudado nas Definições da app.
+  version: VERSION,
+  demo: process.env.DEMO === '1',
+  demoWhenEmpty: true,
+  accounts: process.env.DEMO === '1' ? [] : loadAccounts(),
+  onAccountsChange: fromEnv ? undefined : (list) => fs.writeFileSync(accountsFile, JSON.stringify(list, null, 2), { mode: 0o600 }),
+  // Fornecedor por omissão vindo do ambiente; pode ser mudado nas Definições da app.
   ai: process.env.AI_PROVIDER === 'openai'
     ? { provider: 'openai', apiKey: process.env.AI_API_KEY, model: process.env.AI_MODEL, baseURL: process.env.AI_BASE_URL }
     : { provider: 'anthropic', apiKey: process.env.ANTHROPIC_API_KEY || process.env.AI_API_KEY, model: process.env.AI_MODEL || process.env.ANTHROPIC_MODEL },
   store: fileStore(DATA_DIR),
+  update: createUpdater({ repo: REPO, version: VERSION, packaged: PACKAGED }),
 });
 
 const app = express();
@@ -45,8 +60,6 @@ if (hosted && !process.env.APP_PASSWORD) {
   console.error('APP_PASSWORD é obrigatória quando a app está alojada na internet. Define-a nas variáveis do serviço.');
   process.exit(1);
 }
-
-// Palavra-passe opcional (obrigatória se publicares a app fora do teu computador).
 if (process.env.APP_PASSWORD) {
   app.use((req, res, next) => {
     const [, b64 = ''] = (req.headers.authorization || '').split(' ');
@@ -58,12 +71,27 @@ if (process.env.APP_PASSWORD) {
 }
 
 app.use('/mail', mail.router);
-app.use(express.static(path.join(__dirname, 'public')));
+const indexHtml = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
+app.get('/', (req, res) => res.type('html').send(indexHtml));
 
 const PORT = Number(process.env.PORT || 4321);
 const HOST = process.env.HOST || (process.env.APP_PASSWORD ? '0.0.0.0' : '127.0.0.1');
-app.listen(PORT, HOST, async () => {
-  console.log(`mailroom em http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
-  console.log(demo ? '→ modo demo (sem accounts.json)' : `→ contas: ${mail.accounts.map((a) => a.label).join(', ')}`);
-  console.log((await mail.ai.enabled()) ? '→ IA ativa' : '→ IA simulada (configura um fornecedor nas Definições ou no .env)');
+const url = `http://localhost:${PORT}`;
+const openBrowser = () => {
+  if (!PACKAGED || process.env.MAILROOM_NO_OPEN) return;
+  const cmd = process.platform === 'win32' ? `start "" "${url}"` : process.platform === 'darwin' ? `open "${url}"` : `xdg-open "${url}"`;
+  exec(cmd, () => {});
+};
+
+const server = app.listen(PORT, HOST, async () => {
+  console.log(`mailroom ${VERSION} em ${url}`);
+  console.log(mail.isDemo() ? '→ modo demo: adiciona uma conta em Definições' : `→ contas: ${mail.accounts.map((a) => a.label).join(', ')}`);
+  console.log((await mail.ai.enabled()) ? '→ IA ativa' : '→ IA simulada: configura um fornecedor em Definições');
+  console.log(`→ dados em ${DATA_DIR}`);
+  if (PACKAGED) console.log('\nDeixa esta janela aberta enquanto usas o mailroom. Fecha-a para sair.');
+  openBrowser();
+});
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') { console.log(`O mailroom já está a correr em ${url}.`); openBrowser(); setTimeout(() => process.exit(0), 1500); }
+  else { console.error(e); process.exit(1); }
 });
