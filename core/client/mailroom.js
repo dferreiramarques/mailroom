@@ -80,21 +80,41 @@ function mount(root, host, base) {
   const applyTheme = (t) => { if (hostTheme) return; if (t === 'auto') host.removeAttribute('theme'); else host.setAttribute('theme', t); };
   applyTheme(ls.get('mailroom.theme') || 'light');
 
-  // Tipo de letra: as 5 famílias mais usadas no Google Fonts, carregadas só quando escolhidas.
-  const FONTS = { system: { label: 'Do sistema' }, Roboto: {}, 'Open Sans': {}, Montserrat: {}, Lato: {}, Poppins: {} };
+  // Tipo de letra: Inter (a do Nimble UI kit) por omissão, e uma seleção do Google Fonts.
+  // `w` = pesos pedidos; se o Google recusar, pede-se só a família (o browser sintetiza o negrito).
+  const FONTS = {
+    Inter: { label: 'Inter (Nimble UI)', w: '400;500;600;700' },
+    Lexend: { w: '400;500;600;700' },
+    'Hanken Grotesk': { w: '400;500;600;700' },
+    Figtree: { w: '400;500;600;700' },
+    'Rethink Sans': { w: '400;500;600;700' },
+    Sono: { w: '400;500;600;700' },
+    'Overpass Mono': { w: '400;500;600;700', mono: true },
+    Podkova: { w: '400;500;600;700', serif: true },
+    Solway: { w: '400;500;700', serif: true },
+    'Redaction 20': { w: '400;700', serif: true },
+    system: { label: 'Do sistema (sem descarregar)' },
+  };
+  const DEFAULT_FONT = 'Inter';
   const applyFont = (name) => {
-    if (!FONTS[name] || name === 'system') { host.style.removeProperty('--font'); return; }
-    const id = 'mailroom-font-' + name.replace(/\s/g, '-');
+    const f = FONTS[name] ? name : DEFAULT_FONT;
+    if (f === 'system') { host.style.removeProperty('--font'); return; }
+    const id = 'mailroom-font-' + f.replace(/\s/g, '-');
     // @font-face não funciona dentro do Shadow DOM: a folha vai para o <head> da página.
     if (!document.getElementById(id)) {
+      const fam = encodeURIComponent(f).replace(/%20/g, '+');
       const l = document.createElement('link');
       l.id = id; l.rel = 'stylesheet';
-      l.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(name)}:wght@400;500;600;700&display=swap`;
+      l.href = `https://fonts.googleapis.com/css2?family=${fam}:wght@${FONTS[f].w}&display=swap`;
+      l.onerror = () => { if (!l.dataset.retry) { l.dataset.retry = 1; l.href = `https://fonts.googleapis.com/css2?family=${fam}&display=swap`; } };
       document.head.append(l);
     }
-    host.style.setProperty('--font', `"${name}", ui-sans-serif, system-ui, sans-serif`);
+    const fallback = FONTS[f].mono ? 'ui-monospace, monospace' : FONTS[f].serif ? 'Georgia, serif' : 'ui-sans-serif, system-ui, sans-serif';
+    host.style.setProperty('--font', `"${f}", ${fallback}`);
   };
-  applyFont(ls.get('mailroom.font') || 'system');
+  // Escolhas antigas (Roboto, Poppins…) passam para a nova omissão.
+  if (ls.get('mailroom.font') && !FONTS[ls.get('mailroom.font')]) ls.set('mailroom.font', DEFAULT_FONT);
+  applyFont(ls.get('mailroom.font') || DEFAULT_FONT);
 
   const state = {
     status: null, account: host.getAttribute('account') || 'all', folder: 'INBOX', view: 'topics',
@@ -927,7 +947,7 @@ function mount(root, host, base) {
         <div class="field"><label for="pTheme">Tema</label><select id="pTheme"><option value="light">Claro</option><option value="dark">Escuro</option><option value="auto">Igual ao sistema</option></select></div>
         <div class="field"><label for="pFont">Tipo de letra</label><select id="pFont">${Object.entries(FONTS).map(([k, v]) => `<option value="${esc(k)}">${esc(v.label || k)}</option>`).join('')}</select></div>
       </div>
-      <p class="hint">As fontes do Google Fonts são descarregadas da Google na primeira vez que as escolhes.</p>`}
+      <p class="hint">As fontes vêm do Google Fonts (a Inter incluída), descarregadas na primeira vez que a app as usa. Sem internet, usa a letra do sistema.</p>`}
 
       <h2>Comportamento</h2>
       <label class="toggle"><input type="checkbox" id="pTopics" ${s.prefs.autoTopics ? 'checked' : ''}/> Resumir tópicos automaticamente ao abrir</label>
@@ -957,7 +977,7 @@ function mount(root, host, base) {
     const th = $('#pTheme');
     if (th) { th.value = ls.get('mailroom.theme') || 'light'; th.onchange = () => { ls.set('mailroom.theme', th.value); applyTheme(th.value); }; }
     const fo = $('#pFont');
-    if (fo) { fo.value = ls.get('mailroom.font') || 'system'; fo.onchange = () => { ls.set('mailroom.font', fo.value); applyFont(fo.value); }; }
+    if (fo) { fo.value = ls.get('mailroom.font') || DEFAULT_FONT; fo.onchange = () => { ls.set('mailroom.font', fo.value); applyFont(fo.value); }; }
 
     const f = $('#aiForm'); if (!f) return;
     const syncPreset = (apply) => {
