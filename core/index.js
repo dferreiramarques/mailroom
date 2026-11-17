@@ -410,6 +410,7 @@ export function createMailModule(opts = {}) {
 
   // ---------- atualizações (fornecidas pela app anfitriã) ----------
   router.get('/api/update', h(async (req) => (opts.update ? opts.update.check(Boolean(req.query.fresh)) : { available: false })));
+  router.get('/api/update/progress', h(() => (opts.update?.progress ? opts.update.progress() : null) || {}));
   router.post('/api/update/apply', h(async () => {
     if (!opts.update) throw Object.assign(new Error('Sem atualizador'), { status: 404 });
     return opts.update.apply();

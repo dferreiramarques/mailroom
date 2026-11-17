@@ -27,6 +27,10 @@ const freePort = () => new Promise((resolve, reject) => {
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
 let lastUpdate = null;
+let progress = null; // { percent, phase }
+autoUpdater.on('download-progress', (p) => { progress = { phase: 'download', percent: Math.round(p.percent || 0) }; });
+autoUpdater.on('update-downloaded', () => { progress = { phase: 'install', percent: 100 }; });
+autoUpdater.on('error', () => { if (progress?.phase === 'download') progress = { phase: 'error', percent: 0 }; });
 const updater = {
   async check() {
     const current = app.getVersion();
@@ -47,11 +51,14 @@ const updater = {
   },
   async apply() {
     if (!lastUpdate?.available) throw Object.assign(new Error('Não há atualização para aplicar'), { status: 400 });
-    await autoUpdater.downloadUpdate();
+    progress = { phase: 'download', percent: 0 };
+    try { await autoUpdater.downloadUpdate(); }
+    catch (e) { progress = null; throw new Error('O download falhou: ' + e.message); }
     setTimeout(() => { quitting = true; autoUpdater.quitAndInstall(true, true); }, 1500);
     return { ok: true, version: lastUpdate.latest, restart: 'auto' };
   },
 };
+updater.progress = () => progress;
 globalThis.__mailroomUpdate = updater;
 
 // ---------- janela ----------

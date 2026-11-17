@@ -249,3 +249,9 @@ a { color: var(--focus); }
 .linkbtn:hover { text-decoration: underline; }
 .toast { display: flex; align-items: center; gap: 10px; }
 .toast-btn { border: 0; background: none; color: inherit; font-weight: 650; text-decoration: underline; padding: 0; cursor: pointer; }
+
+.progress { height: 6px; background: var(--soft); border-radius: 99px; overflow: hidden; margin: 4px 0 12px; }
+.progress > div { height: 100%; width: 0; background: var(--accent); transition: width 0.3s; }
+a.btn { text-decoration: none; color: inherit; display: inline-block; }
+
+[hidden] { display: none !important; }

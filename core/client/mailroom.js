@@ -888,6 +888,9 @@ function mount(root, host, base) {
     $('#reader').innerHTML = `<div class="pane">
       ${backBtn()}<h1>Definições</h1>
 
+      <h2>Atualizações</h2>
+      <div id="versionBox" class="muted">${spin('A verificar atualizações…')}</div>
+
       <h2>Inteligência artificial</h2>
       <p class="muted" style="margin-top:0">Usada nos resumos dos tópicos, sugestões de resposta, pesquisa rápida e workflows.</p>
       ${a.locked ? `<div class="card">Gerido pela plataforma: <b>${esc(a.provider)}</b> ${esc(a.model)}</div>` : `
@@ -921,9 +924,6 @@ function mount(root, host, base) {
 
       <h2 id="accountsTitle">Contas</h2>
       <div id="accountsBox"></div>
-
-      <h2>Versão</h2>
-      <div id="versionBox" class="muted">${spin('A verificar atualizações…')}</div>
     </div>`;
     renderAccounts();
     renderVersion(true);
@@ -1049,25 +1049,60 @@ function mount(root, host, base) {
   async function applyUpdate(btn) {
     const u = state.update; if (!u?.available) return;
     if (!u.canApply) { window.open(u.url, '_blank', 'noopener'); return; }
-    if (!btn.dataset.armed) { btn.dataset.armed = 1; btn.textContent = `Confirmar: instalar v${u.latest}`; setTimeout(() => { delete btn.dataset.armed; if (state.update?.available) btn.textContent = `Atualizar para v${u.latest}`; }, 5000); return; }
-    btn.disabled = true; btn.innerHTML = spin('A descarregar…');
+    if (!btn.dataset.armed) {
+      btn.dataset.armed = 1; btn.textContent = `Confirmar: instalar v${u.latest}`;
+      setTimeout(() => { if (btn.isConnected && !btn.disabled) { delete btn.dataset.armed; btn.textContent = btn.id === 'updateBtn' ? `Atualizar para v${u.latest}` : `Descarregar e instalar v${u.latest}`; } }, 5000);
+      return;
+    }
+    // Mostra o progresso nos dois sítios (barra lateral e Definições).
+    const show = (text) => { [$('#updateBtn'), $('#updNow')].forEach((b) => { if (b) { b.disabled = true; b.textContent = text; } }); const bar = $('#updBar'); if (bar) bar.hidden = false; };
+    show('A descarregar… 0%');
+    const timer = setInterval(async () => {
+      try {
+        const p = await api('/api/update/progress');
+        if (p.phase === 'download') { show(`A descarregar… ${p.percent}%`); const f = $('#updBarFill'); if (f) f.style.width = p.percent + '%'; }
+        if (p.phase === 'install') { show('A instalar… a app vai reiniciar'); const f = $('#updBarFill'); if (f) f.style.width = '100%'; }
+      } catch { /* a app está a reiniciar */ }
+    }, 500);
     try {
       const r = await api('/api/update/apply', { method: 'POST' });
-      btn.textContent = r.restart === 'auto' ? `A instalar v${r.version}…` : `v${r.version} instalada — fecha e volta a abrir`;
-      toast(r.restart === 'auto' ? 'A instalar. O mailroom reinicia sozinho.' : 'Atualização instalada. Fecha o mailroom e abre-o outra vez.');
-    } catch (e) { btn.disabled = false; btn.textContent = 'Atualização falhou — abrir página'; state.update.canApply = false; toast('Erro: ' + e.message); }
+      if (r.restart !== 'auto') { clearInterval(timer); show(`v${r.version} instalada — fecha e volta a abrir`); toast('Atualização instalada. Fecha o mailroom e abre-o outra vez.'); }
+      else toast('A instalar. O mailroom reinicia sozinho.');
+    } catch (e) {
+      clearInterval(timer);
+      [$('#updateBtn'), $('#updNow')].forEach((b) => { if (b) { b.disabled = false; delete b.dataset.armed; b.textContent = 'Tentar outra vez'; } });
+      const bar = $('#updBar'); if (bar) bar.hidden = true;
+      toast('Erro: ' + e.message);
+    }
   }
   $('#updateBtn').onclick = (e) => applyUpdate(e.currentTarget);
   async function renderVersion(fresh) {
     const box = $('#versionBox'); if (!box) return;
+    box.innerHTML = spin('A verificar atualizações…');
     const u = await checkUpdate(fresh);
     if (!$('#versionBox')) return;
     const cur = u?.current || state.status.version || '?';
-    box.innerHTML = u?.available
-      ? `<div class="card"><div class="c-title">Há uma versão nova: v${esc(u.latest)} <span class="muted">(tens a v${esc(cur)})</span></div>${u.notes ? `<div class="c-body muted" style="margin-bottom:10px">${esc(u.notes)}</div>` : ''}<div class="actions" style="margin:0"><button class="btn primary" id="updNow">${u.canApply ? 'Atualizar agora' : 'Abrir página da versão'}</button></div>${u.packaged ? '' : '<p class="hint" style="margin:10px 0 0">Instalação a partir do código: <code>git pull && npm install</code>.</p>'}</div>`
-      : `<span>mailroom v${esc(cur)} · ${u?.error ? esc(u.error) : u?.latest ? 'está atualizado' : 'ainda não há versões publicadas'}</span> <button class="btn" id="updCheck">Verificar agora</button>`;
+    const when = new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+    if (u?.available) {
+      box.innerHTML = `<div class="card">
+        <div class="c-title">Há uma versão nova: v${esc(u.latest)} <span class="muted" style="font-weight:400">(tens a v${esc(cur)})</span></div>
+        ${u.notes ? `<div class="c-body muted" style="margin-bottom:10px">${esc(u.notes)}</div>` : ''}
+        <div class="progress" id="updBar" hidden><div id="updBarFill"></div></div>
+        <div class="actions" style="margin:0">
+          <button class="btn primary" id="updNow">${u.canApply ? `Descarregar e instalar v${esc(u.latest)}` : 'Abrir página da versão'}</button>
+          <a class="btn" href="${esc(u.url)}" target="_blank" rel="noopener">Ver no GitHub</a>
+        </div>
+        ${u.packaged ? '<p class="hint" style="margin:10px 0 0">A app fecha, instala e volta a abrir sozinha. As tuas contas e definições mantêm-se.</p>' : '<p class="hint" style="margin:10px 0 0">Instalação a partir do código: <code>git pull && npm install</code>.</p>'}
+      </div>`;
+    } else {
+      const msg = u?.error ? `<span style="color:var(--warn)">${esc(u.error)}</span>` : u?.latest ? 'Tens a versão mais recente.' : 'Ainda não há versões publicadas.';
+      box.innerHTML = `<div class="card"><div class="c-head" style="margin:0;gap:12px;flex-wrap:wrap">
+        <span><b style="color:var(--ink)">mailroom v${esc(cur)}</b> · ${msg} <span class="muted">Verificado às ${when}.</span></span>
+        <span><button class="btn" id="updCheck">Verificar agora</button> <a class="btn" href="${esc(u?.url || 'https://github.com/dferreiramarques/mailroom/releases')}" target="_blank" rel="noopener">Versões</a></span>
+      </div></div>`;
+    }
     $('#updNow')?.addEventListener('click', (e) => applyUpdate(e.currentTarget));
-    $('#updCheck')?.addEventListener('click', () => { box.innerHTML = spin('A verificar…'); renderVersion(true); });
+    $('#updCheck')?.addEventListener('click', () => renderVersion(true));
   }
 
   // =====================================================================
