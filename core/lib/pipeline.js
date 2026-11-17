@@ -28,6 +28,28 @@ function weekStart(d = now()) {
 const addDays = (d, n) => new Date(new Date(d).getTime() + n * DAY);
 const domainOf = (e = '') => e.split('@')[1]?.toLowerCase() || '';
 
+// Frente monco (desde a 0.8): o Explora3D como porta de entrada para apresentação, formação e consultoria.
+const MONCO_AUDIENCE = 'Agrupamentos de escolas públicas do Grande Porto (direção; coordenação TIC / Laboratórios de Educação Digital) e centros de formação de professores (CFAE)';
+const MONCO_BRIEF = [
+  'Sou o David Ferreira Marques, da monco.io (Porto). Desenvolvi o Explora3D, uma suite gratuita, no navegador, para introduzir a modelação e a impressão 3D a alunos dos 8 aos 14 anos: quatro ferramentas (Area, Volume, Revolve e Voxel) e uma sala de aula integrada, em que o professor lança um desafio por código e acompanha as entregas da turma. Funciona com ou sem impressora e exporta ficheiros STL para as impressoras que as escolas já têm, incluindo as dos Laboratórios de Educação Digital.',
+  'Para um agrupamento: proponho uma apresentação de 30 a 45 minutos à equipa docente (presencial ou online), com uma primeira aula preparada em conjunto; depois, se fizer sentido, formação e acompanhamento da implementação.',
+  'Para um CFAE: proponho uma ação de curta duração para professores do 1.º ao 3.º ciclo («Do laboratório digital à sala de aula: primeira aula de 3D»), em formato de 3 ou 6 horas.',
+  'Credenciais: mais de 15 anos a ensinar design na ESAD; antigo coordenador do Centro de Inovação Carlos Fiolhais.',
+  'Pedido: uma conversa de 20 minutos ou marcar a apresentação.',
+  'Terminar com uma linha simples a dizer que, se não fizer sentido para eles, não volto a escrever.',
+].join('\n');
+const MONCO_MATERIALS = 'Vídeo de 2 minutos: https://explora3d.monco.io/#video · Experimentar: https://explora3d.monco.io · Formação e consultoria: https://www.monco.io/spark';
+
+// Atualiza a frente monco guardada enquanto ainda tiver o texto de origem (com [marcadores]); nunca toca em textos editados.
+function upgradeStreams(streams) {
+  const m = streams?.find((x) => x.id === 'monco');
+  if (m && /\[Descrever em 2 frases/.test(m.brief || '')) {
+    m.name = 'monco · Explora3D (agrupamentos e CFAE)'; m.audience = MONCO_AUDIENCE; m.brief = MONCO_BRIEF;
+    if (!m.materials || /^\[link/.test(m.materials)) m.materials = MONCO_MATERIALS;
+  }
+  return streams;
+}
+
 export function defaultStreams(accounts) {
   const pick = (re) => (accounts.find((a) => re.test(a.address)) || accounts[0] || {}).id || '';
   return [
@@ -38,10 +60,10 @@ export function defaultStreams(accounts) {
       materials: '[link do press kit] [link para um protótipo jogável]',
     },
     {
-      id: 'monco', name: 'monco · escolas e colégios (Spark)', account: pick(/monco/i), weeklyTarget: 10, followUpDays: 7, closeAfterDays: 10, language: 'pt-PT',
-      audience: 'Escolas privadas e colégios (direção, coordenação TIC/STEAM)',
-      brief: 'Sou o David, da monco.io. [Descrever em 2 frases os produtos Spark e para que turmas/disciplinas servem.]\nProposta: testar os produtos Spark numa turma, sem custo, durante [período].\nPedido: marcar uma demonstração de 20 minutos (online ou na escola).',
-      materials: '[link para a página Spark] [link para um vídeo ou demonstração]',
+      id: 'monco', name: 'monco · Explora3D (agrupamentos e CFAE)', account: pick(/monco/i), weeklyTarget: 10, followUpDays: 7, closeAfterDays: 10, language: 'pt-PT',
+      audience: MONCO_AUDIENCE,
+      brief: MONCO_BRIEF,
+      materials: MONCO_MATERIALS,
     },
   ];
 }
@@ -52,14 +74,14 @@ export function createPipeline({ store, io, accById, accs, ai, getSettings, addD
   const set = async (k, v) => (store.getData ? store.setData(k, v) : store.setSettings({ ...(await store.getSettings()), [`_${k}`]: v }));
   let chain = Promise.resolve();
   const tx = (fn) => (chain = chain.then(async () => {
-    const st = { streams: await get('streams', null), contacts: await get('contacts', []) };
+    const st = { streams: upgradeStreams(await get('streams', null)), contacts: await get('contacts', []) };
     if (!st.streams?.length) st.streams = defaultStreams(accs());
     const out = await fn(st);
     await set('streams', st.streams); await set('contacts', st.contacts);
     return out;
   }));
   const read = async () => {
-    let streams = await get('streams', null);
+    let streams = upgradeStreams(await get('streams', null));
     if (!streams?.length) streams = defaultStreams(accs());
     return { streams, contacts: await get('contacts', []) };
   };
