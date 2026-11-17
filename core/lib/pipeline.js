@@ -76,14 +76,14 @@ export function createPipeline({ store, io, accById, accs, ai, getSettings, addD
   let chain = Promise.resolve();
   const tx = (fn) => (chain = chain.then(async () => {
     const st = { streams: upgradeStreams(await get('streams', null)), contacts: withCountry(await get('contacts', [])) };
-    if (!st.streams?.length) st.streams = defaultStreams(accs());
+    if (st.streams == null) st.streams = defaultStreams(accs());
     const out = await fn(st);
     await set('streams', st.streams); await set('contacts', st.contacts);
     return out;
   }));
   const read = async () => {
     let streams = upgradeStreams(await get('streams', null));
-    if (!streams?.length) streams = defaultStreams(accs());
+    if (streams == null) streams = defaultStreams(accs());
     return { streams, contacts: withCountry(await get('contacts', [])) };
   };
   // Contactos antigos não tinham país: deduz-se das notas ou do domínio do e-mail.
@@ -316,6 +316,31 @@ export function createPipeline({ store, io, accById, accs, ai, getSettings, addD
       c.updatedAt = iso();
       return c;
     }),
+    createStream: (data = {}) => tx((st) => {
+      const name = String(data.name || '').trim();
+      if (!name) throw Object.assign(new Error('Dá um nome ao funil'), { status: 400 });
+      const slug = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'funil';
+      let id = slug; for (let i = 2; st.streams.some((x) => x.id === id); i++) id = `${slug}-${i}`;
+      const s = {
+        id, name, account: String(data.account || accs()[0]?.id || ''), weeklyTarget: 10, followUpDays: 7, closeAfterDays: 10,
+        language: String(data.language || 'auto'), audience: String(data.audience || ''),
+        brief: String(data.brief || '[Quem és, o que propões e qual é o pedido concreto no fim do e-mail.]'), materials: String(data.materials || ''),
+      };
+      st.streams.push(s);
+      return s;
+    }),
+    // Apaga o funil, os seus contactos e os rascunhos por enviar que lhe pertencem. O correio já enviado fica nas caixas.
+    removeStream: async (id) => {
+      const out = await tx((st) => {
+        if (!st.streams.some((x) => x.id === id)) throw Object.assign(new Error('Frente desconhecida'), { status: 404 });
+        const n = st.contacts.filter((c) => c.stream === id).length;
+        st.streams = st.streams.filter((x) => x.id !== id);
+        st.contacts = st.contacts.filter((c) => c.stream !== id);
+        return { ok: true, contacts: n };
+      });
+      out.drafts = await editDrafts((d) => { const keep = d.filter((x) => x.stream !== id); return { drafts: keep, value: d.length - keep.length }; });
+      return out;
+    },
     removeContact: (id) => tx((st) => { st.contacts = st.contacts.filter((x) => x.id !== id); return { ok: true }; }),
   };
 }

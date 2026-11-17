@@ -968,6 +968,35 @@ function mount(root, host, base) {
     } catch { return null; }
   }
 
+  // Criar um funil: só o essencial; o briefing e as metas afinam-se depois nas definições.
+  function newStreamForm(r) {
+    const first = !r.streams.length;
+    $('#fBody').innerHTML = `
+      <section class="card">
+        <h2 style="margin-top:0">${first ? 'Cria o teu primeiro funil' : 'Novo funil'}</h2>
+        <p class="muted">Um funil é uma frente de prospeção: um público, uma conta de onde saem os e-mails e um briefing que a IA usa para escrever os pitches.</p>
+        <form id="nsForm">
+          <div class="row">
+            <div class="field"><label for="nsName">Nome</label><input id="nsName" name="name" required placeholder="ex.: Bitnik · lojas de jogos" /></div>
+            <div class="field"><label for="nsAcc">Enviar de</label><select id="nsAcc" name="account">${state.status.accounts.map((a) => `<option value="${esc(a.id)}">${esc(a.address)}</option>`).join('')}</select></div>
+          </div>
+          <div class="field"><label for="nsAud">Público</label><input id="nsAud" name="audience" placeholder="ex.: lojas de jogos de tabuleiro em Portugal e Espanha" /></div>
+          <div class="field"><label for="nsLang">Língua dos e-mails</label><select id="nsLang" name="language">${[['auto', 'A do país de cada contacto'], ...Object.entries(r.languages || {})].map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select></div>
+          <div class="actions" style="margin:0"><button class="btn primary">Criar funil</button>${first ? '' : '<button type="button" class="btn" id="nsCancel">Cancelar</button>'}</div>
+        </form>
+        ${state.status.accounts.length ? '' : '<p class="hint">Ainda não há contas de correio: adiciona uma em Definições para poderes enviar.</p>'}
+      </section>`;
+    $('#nsName').focus();
+    $('#nsCancel')?.addEventListener('click', () => { state.funnelNew = false; viewFunnel(); });
+    $('#nsForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const s = await api('/api/pipeline/streams', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+      state.funnelNew = false; state.funnelStream = s.id; state.funnelSettingsOpen = true;
+      toast('Funil criado — completa o briefing nas definições');
+      viewFunnel();
+    };
+  }
+
   async function viewFunnel(opts = {}) {
     const reader = $('#reader');
     if (!$('#funnelPane')) reader.innerHTML = `<div class="pane wide" id="funnelPane">${backBtn()}<h1>Funil</h1><div id="fBody">${spin('A ler as caixas…')}</div></div>`;
@@ -975,6 +1004,7 @@ function mount(root, host, base) {
     try { r = await api(`/api/pipeline${opts.sync ? '?sync=1' : ''}`); } catch (e) { $('#fBody').innerHTML = `<p>Erro: ${esc(e.message)}</p>`; return; }
     state.pipeline = r;
     $('#funnelCount').textContent = r.week.reduce((a, w) => a + w.replies + w.followDue + w.actions, 0) || '';
+    if (state.funnelNew || !r.streams.length) return newStreamForm(r);
     if (!state.funnelStream || !r.streams.some((x) => x.id === state.funnelStream)) state.funnelStream = r.streams[0]?.id;
     const s = r.streams.find((x) => x.id === state.funnelStream);
     const w = r.week.find((x) => x.id === s.id);
@@ -990,7 +1020,7 @@ function mount(root, host, base) {
       : `Preparar ${Math.min(w.toPlan, w.available)} pitch${Math.min(w.toPlan, w.available) > 1 ? 'es' : ''} da semana`;
 
     $('#fBody').innerHTML = `
-      <div class="seg" role="tablist">${r.streams.map((x) => { const wx = r.week.find((y) => y.id === x.id); const n = wx.replies + wx.followDue + wx.actions; return `<button role="tab" data-stream="${esc(x.id)}" class="${x.id === s.id ? 'on' : ''}">${esc(x.name)}${n ? ` <span class="badge">${n}</span>` : ''}</button>`; }).join('')}</div>
+      <div class="seg-row"><div class="seg" role="tablist">${r.streams.map((x) => { const wx = r.week.find((y) => y.id === x.id); const n = wx.replies + wx.followDue + wx.actions; return `<button role="tab" data-stream="${esc(x.id)}" class="${x.id === s.id ? 'on' : ''}">${esc(x.name)}${n ? ` <span class="badge">${n}</span>` : ''}</button>`; }).join('')}</div><button class="btn" data-fx="newStream">+ Novo funil</button></div>
 
       <section class="card week">
         <div class="week-head">
@@ -1035,7 +1065,7 @@ function mount(root, host, base) {
           <span class="muted cloc" title="${esc([r.countries?.[c.country] || 'País desconhecido', 'escreve em ' + (r.languages?.[c.langResolved] || c.langResolved)].join(' · '))}">${esc(c.country || '—')} · ${esc(String(c.langResolved || '').split('-')[0].toUpperCase())}</span>
           <span class="pill st-${esc(c.status)}">${esc(r.statuses[c.status])}</span>
           <span class="cnext muted">${c.nextAction && !CLOSED.has(c.status) ? `${esc(c.nextAction.text)} · ${dueLabel(c.nextAction.due)}` : c.firstContactAt ? `contactado ${dayFmt(c.firstContactAt)}` : ''}${drafts.some((d) => d.contactId === c.id) ? ' · <span class="tag">rascunho</span>' : ''}</span>
-        </button>`).join('')}</div>` : `<p class="muted">${cs.length ? 'Nenhum contacto neste filtro.' : 'Ainda não há contactos nesta frente. Adiciona os primeiros em baixo.'}</p>`}
+        </button>`).join('')}</div>` : `<p class="muted">${cs.length ? 'Nenhum contacto neste filtro.' : 'Ainda não há contactos neste funil. Adiciona os primeiros em baixo.'}</p>`}
 
       <details class="card" ${cs.length ? '' : 'open'}>
         <summary><b>Adicionar contactos</b></summary>
@@ -1047,8 +1077,8 @@ function mount(root, host, base) {
         </form>
       </details>
 
-      <details class="card">
-        <summary><b>Definições desta frente</b> <span class="muted">· meta ${s.weeklyTarget}/semana · follow-up ao fim de ${s.followUpDays} dias · fecha ${s.closeAfterDays} dias depois</span></summary>
+      <details class="card" ${state.funnelSettingsOpen ? 'open' : ''}>
+        <summary><b>Definições deste funil</b> <span class="muted">· meta ${s.weeklyTarget}/semana · follow-up ao fim de ${s.followUpDays} dias · fecha ${s.closeAfterDays} dias depois</span></summary>
         <form id="streamForm" style="margin-top:12px">
           <div class="row">
             <div class="field"><label for="sfName">Nome</label><input id="sfName" name="name" value="${esc(s.name)}" /></div>
@@ -1064,9 +1094,11 @@ function mount(root, host, base) {
             <div class="field"><label for="sfF">Follow-up ao fim de (dias)</label><input id="sfF" name="followUpDays" type="number" min="1" max="60" value="${s.followUpDays}" /></div>
             <div class="field"><label for="sfC">Fechar sem resposta (dias após o follow-up)</label><input id="sfC" name="closeAfterDays" type="number" min="1" max="90" value="${s.closeAfterDays}" /></div>
           </div>
-          <div class="actions" style="margin:0"><button class="btn primary">Guardar</button></div>
+          <div class="actions" style="margin:0"><button class="btn primary">Guardar</button><span class="grow"></span><button type="button" class="btn danger" id="delStream">Apagar funil</button></div>
+          <p class="hint" style="margin-top:8px">Apagar remove o funil, os seus ${cs.length} contacto(s) e os rascunhos por enviar. Os e-mails já enviados ficam na caixa de correio.</p>
         </form>
       </details>`;
+    state.funnelSettingsOpen = false;
 
     const pane = $('#funnelPane');
     pane.onclick = async (e) => {
@@ -1077,6 +1109,7 @@ function mount(root, host, base) {
       const b = e.target.closest('[data-fx]'); if (!b) return;
       const fx = b.dataset.fx, cid = b.dataset.cid;
       if (fx === 'sync') { b.disabled = true; return viewFunnel({ sync: true }); }
+      if (fx === 'newStream') { state.funnelNew = true; return viewFunnel(); }
       if (fx === 'contact') return openContact(cid);
       if (fx === 'status') { await api(`/api/pipeline/contacts/${cid}`, { method: 'PUT', body: { status: b.dataset.to } }); toast(`Marcado: ${r.statuses[b.dataset.to]}`); return viewFunnel(); }
       if (fx === 'openReply') { const c = r.contacts.find((x) => x.id === cid); return openHit({ account: c.reply.account, uid: c.reply.uid, folder: 'INBOX' }); }
@@ -1101,6 +1134,15 @@ function mount(root, host, base) {
       const res = await api('/api/pipeline/contacts', { method: 'POST', body: { stream: s.id, contacts: list } });
       toast(`${res.added.length} adicionado(s)${res.skipped.length ? ` · ${res.skipped.length} ignorado(s) (${[...new Set(res.skipped.map((x) => x.reason))].join(', ')})` : ''}`);
       viewFunnel();
+    };
+    let delArmed = null;
+    $('#delStream').onclick = async (e) => {
+      const btn = e.currentTarget;
+      if (!delArmed) { btn.textContent = `Confirmar: apagar «${s.name}»`; delArmed = setTimeout(() => { delArmed = null; btn.textContent = 'Apagar funil'; }, 4000); return; }
+      clearTimeout(delArmed); btn.disabled = true;
+      const res = await api(`/api/pipeline/streams/${encodeURIComponent(s.id)}`, { method: 'DELETE' });
+      toast(`Funil apagado · ${res.contacts} contacto(s)${res.drafts ? ` · ${res.drafts} rascunho(s)` : ''}`);
+      state.funnelStream = null; state.drafts = state.drafts.filter((d) => d.stream !== s.id); viewFunnel();
     };
     $('#streamForm').onsubmit = async (e) => {
       e.preventDefault();

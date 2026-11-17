@@ -278,6 +278,8 @@ a.btn { text-decoration: none; color: inherit; display: inline-block; }
 
 /* ---------- funil ---------- */
 .pane.wide { max-width: 980px; }
+.seg-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; }
+.seg-row > .btn { margin-top: 4px; }
 .seg { display: inline-flex; flex-wrap: wrap; gap: 4px; background: var(--soft); border-radius: 10px; padding: 4px; margin-bottom: 18px; }
 .seg button { border: 0; background: none; border-radius: 7px; padding: 7px 14px; font-size: 14px; color: var(--muted); }
 .seg button.on { background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-1); }
