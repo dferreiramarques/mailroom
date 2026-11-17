@@ -28,7 +28,10 @@ async function withClient(acc, fn) {
     secure: acc.imap.secure ?? true,
     auth: { user: acc.imap.user, pass: acc.imap.pass },
     logger: false,
+    connectionTimeout: 15000,
   });
+  // Sem isto, um erro de rede emitido fora de um pedido derrubava o processo.
+  client.on('error', () => {});
   await client.connect();
   try {
     return await fn(client);
@@ -222,4 +225,35 @@ export async function getMany(acc, refs) {
     });
   }
   return (await Promise.all(out)).sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
+// Testa IMAP e SMTP separadamente e devolve mensagens que se percebem.
+export function explainError(e, kind, host, port) {
+  const code = e?.code || e?.cause?.code || '';
+  const text = [e?.responseText, e?.response, e?.message].filter(Boolean).join(' ');
+  if (e?.authenticationFailed || /AUTHENTICATIONFAILED|Invalid credentials|authentication failed|\b535\b|EAUTH/i.test(text + code))
+    return `${kind}: utilizador ou palavra-passe errados.`;
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || /ENOTFOUND|EAI_AGAIN/.test(text)) return `${kind}: o servidor "${host}" não existe. Confirma o nome.`;
+  if (code === 'ECONNREFUSED' || /ECONNREFUSED/.test(text)) return `${kind}: ${host} recusou a ligação na porta ${port}. Confirma a porta.`;
+  if (code === 'ETIMEDOUT' || code === 'ESOCKET' && /timeout/i.test(text) || /timed? ?out/i.test(text)) return `${kind}: ${host}:${port} não respondeu. Confirma o servidor e a porta (ou se uma firewall bloqueia).`;
+  if (/CERT|SELF_SIGNED|UNABLE_TO_VERIFY|altnames/i.test(code + text)) return `${kind}: o certificado de segurança de ${host} não é válido para esse nome. Experimenta o nome de servidor que o cPanel indica (por ex. mail.dominio ou o nome do servidor de alojamento).`;
+  if (/wrong version number|EPROTO/i.test(code + text)) return `${kind}: a porta ${port} não usa ligação segura direta. Usa 993 (IMAP) e 465 (SMTP).`;
+  return `${kind}: ${text || code || 'erro desconhecido'}`;
+}
+
+export async function testAccount(acc) {
+  const errors = [];
+  try {
+    await withClient(acc, async (client) => { await client.mailboxOpen('INBOX', { readOnly: true }); });
+  } catch (e) { errors.push(explainError(e, 'Receber (IMAP)', acc.imap.host, acc.imap.port ?? 993)); }
+  try {
+    const port = acc.smtp.port ?? 465;
+    const t = nodemailer.createTransport({
+      host: acc.smtp.host, port, secure: acc.smtp.secure ?? port === 465,
+      auth: { user: acc.smtp.user, pass: acc.smtp.pass }, connectionTimeout: 15000, greetingTimeout: 15000,
+    });
+    await t.verify();
+    t.close();
+  } catch (e) { errors.push(explainError(e, 'Enviar (SMTP)', acc.smtp.host, acc.smtp.port ?? 465)); }
+  return errors.length ? { ok: false, error: errors.join(' · ') } : { ok: true };
 }

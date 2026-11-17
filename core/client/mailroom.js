@@ -986,7 +986,7 @@ function mount(root, host, base) {
       st('', spin('A testar a ligação…'));
       try {
         const r2 = await api('/api/accounts', { method: 'POST', body: { ...Object.fromEntries(new FormData(f)), saveAnyway } });
-        if (!r2.saved) { st('err', `Não consegui ligar: ${esc(r2.test.error)} <a href="#" id="saveAnyway">Guardar mesmo assim</a>`); $('#saveAnyway').onclick = (e) => { e.preventDefault(); submit(true); }; return; }
+        if (!r2.saved) { st('err', `${r2.test.error.split(' · ').map(esc).join('<br>')}<br><a href="#" id="saveAnyway">Guardar mesmo assim</a>`); $('#saveAnyway').onclick = (e) => { e.preventDefault(); submit(true); }; return; }
         toast(r2.test.ok ? 'Conta ligada' : 'Conta guardada (sem ligação)');
         await accountsChanged();
       } catch (e) { st('err', esc(e.message)); }

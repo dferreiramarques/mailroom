@@ -366,9 +366,8 @@ export function createMailModule(opts = {}) {
       };
       if (!acc.imap.host || !acc.smtp.host) throw Object.assign(new Error('Faltam os servidores IMAP/SMTP'), { status: 400 });
       // Testa a ligação antes de guardar, para o erro aparecer já.
-      let test = { ok: true };
-      try { mail.invalidateAccount(acc); await mail.listMessages(acc, { folder: 'INBOX', limit: 1 }); }
-      catch (e) { test = { ok: false, error: e.responseText || e.message }; }
+      mail.invalidateAccount(acc);
+      const test = await mail.testAccount(acc);
       if (!test.ok && !b.saveAnyway) return { saved: false, test };
       userAccounts = prev ? userAccounts.map((a) => (a.id === id ? acc : a)) : [...userAccounts, acc];
       await changed();
