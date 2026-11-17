@@ -155,7 +155,7 @@ button { cursor: pointer; }
 .board-head h1 { font-size: 15px; font-weight: 650; margin: 0; }
 .board-head .muted { font-size: 13px; }
 .board-head .grow { flex: 1; }
-.board-head input { width: 240px; max-width: 100%; border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); padding: 7px 10px; }
+.board-head input { width: 190px; max-width: 100%; border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); padding: 7px 10px; }
 .topic { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; margin-bottom: 14px; transition: border-color 0.15s, box-shadow 0.15s; }
 .topic:hover { border-color: color-mix(in srgb, var(--line) 50%, var(--muted)); }
 .topic.open { box-shadow: 0 6px 24px rgb(0 0 0 / 0.06); border-color: color-mix(in srgb, var(--line) 40%, var(--muted)); }
@@ -240,3 +240,12 @@ button { cursor: pointer; }
 .nav.update { color: var(--focus); font-weight: 600; font-size: 13px; }
 code { font: 12px ui-monospace, monospace; background: var(--soft); padding: 1px 5px; border-radius: 4px; }
 a { color: var(--focus); }
+
+.t-actions { align-items: center; }
+.t-actions .grow { flex: 1; }
+.topic.leaving { opacity: 0; transform: translateX(12px); transition: opacity 0.15s, transform 0.15s; }
+@media (prefers-reduced-motion: reduce) { .topic.leaving { transition: none; } }
+.linkbtn { border: 0; background: none; color: var(--focus); font-size: 13px; padding: 2px 4px; cursor: pointer; }
+.linkbtn:hover { text-decoration: underline; }
+.toast { display: flex; align-items: center; gap: 10px; }
+.toast-btn { border: 0; background: none; color: inherit; font-weight: 650; text-decoration: underline; padding: 0; cursor: pointer; }

@@ -53,6 +53,8 @@ export function createMailModule(opts = {}) {
 
   const rawSettings = async () => (await store.getSettings()) || {};
   const getSettings = async () => { const s = await rawSettings(); return { ...defaults, name: s.name ?? defaults.name, about: s.about ?? defaults.about, voice: s.voice ?? defaults.voice }; };
+  const getDismissed = async () => (await rawSettings()).dismissed || {};
+  const lastIncomingId = (t) => { const m = [...t.messages].reverse().find((x) => x.folder === 'INBOX') || t.messages.at(-1); return m.messageId || `${m.folder}-${m.uid}`; };
   const prefs = async () => ({ autoTopics: true, autoSuggest: true, ...((await rawSettings()).prefs || {}) });
   const aiConfig = async () => {
     if (opts.lockAI) return baseAI;
@@ -158,8 +160,14 @@ export function createMailModule(opts = {}) {
     const errors = [];
     const load = async (a, folder) => io.list(a, { folder, query: q, limit: 60 }).catch((e) => (errors.push(`${a.label}: ${e.message}`), []));
     const [inbox, sent] = await Promise.all(['INBOX', 'Sent'].map(async (f) => (await Promise.all(targets.map((a) => load(a, f)))).flat()));
-    const topics = buildTopics(inbox, sent).slice(0, Number(req.query.limit || 30));
-    topics.forEach((t) => topicIndex.set(t.id, t));
+    const all = buildTopics(inbox, sent);
+    all.forEach((t) => topicIndex.set(t.id, t));
+    // Arrumados: escondidos até chegar uma mensagem nova (de outra pessoa) nessa conversa.
+    const dismissed = await getDismissed();
+    const isDismissed = (t) => dismissed[t.id] && dismissed[t.id] === lastIncomingId(t);
+    const showDismissed = req.query.dismissed === '1';
+    const dismissedCount = all.filter(isDismissed).length;
+    const topics = all.filter((t) => (showDismissed ? isDismissed(t) : !isDismissed(t))).slice(0, Number(req.query.limit || 30));
 
     const wantAI = req.query.ai !== '0' && (await prefs()).autoTopics;
     const missing = topics.filter((t) => !summaryCache.has(`${t.id}|${t.lastMessageId}`));
@@ -179,12 +187,32 @@ export function createMailModule(opts = {}) {
     }
     return {
       errors,
+      dismissedCount,
       topics: topics.map(({ messages, ...t }) => ({
         ...t,
         ai: summaryCache.get(`${t.id}|${t.lastMessageId}`) || null,
         messages: messages.map(({ preview, ...m }) => m),
       })),
     };
+  }));
+
+  // Arrumar / repor um tópico
+  router.post('/api/topics/dismiss', h(async (req) => {
+    const t = topicIndex.get(req.body.id);
+    if (!t) throw Object.assign(new Error('Tópico não encontrado — atualiza a lista'), { status: 404 });
+    const cur = await rawSettings();
+    const d = { ...(cur.dismissed || {}) };
+    if (req.body.undo) delete d[t.id];
+    else {
+      d[t.id] = lastIncomingId(t);
+      // Também marca como lidas as mensagens recebidas da conversa.
+      for (const m of t.messages) if (m.folder === 'INBOX' && !m.seen) { io.seen(accById(t.account), m.uid, 'INBOX', true).catch(() => {}); m.seen = true; }
+    }
+    // Guarda no máximo os 2000 mais recentes.
+    const keys = Object.keys(d);
+    if (keys.length > 2000) keys.slice(0, keys.length - 2000).forEach((k) => delete d[k]);
+    await store.setSettings({ ...cur, dismissed: d });
+    return { ok: true };
   }));
 
   // Conversa completa (modo focado)

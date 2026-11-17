@@ -20,7 +20,7 @@ function ago(d) {
   const s = (Date.now() - new Date(d)) / 1000;
   if (s < 3600) return `há ${Math.max(1, Math.round(s / 60))} min`;
   if (s < 86400) return `há ${Math.round(s / 3600)} h`;
-  if (s < 86400 * 30) return `há ${Math.round(s / 86400)} dias`;
+  if (s < 86400 * 30) { const d = Math.round(s / 86400); return `há ${d} dia${d > 1 ? 's' : ''}`; }
   return new Date(d).toLocaleDateString('pt-PT', { day: 'numeric', month: 'short' });
 }
 const monthYear = (d) => new Date(d).toLocaleDateString('pt-PT', { month: 'short', year: new Date(d).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
@@ -84,7 +84,7 @@ function mount(root, host, base) {
     status: null, account: host.getAttribute('account') || 'all', folder: 'INBOX', view: 'topics',
     mode: host.getAttribute('mode') || ls.get('mailroom.mode') || 'topics',
     items: [], index: -1, current: null, drafts: [], query: '', topicQuery: '',
-    topics: [], topicErrors: [], open: new Set(), threads: new Map(), suggestions: new Map(),
+    topics: [], topicErrors: [], dismissedCount: 0, showDismissed: false, open: new Set(), threads: new Map(), suggestions: new Map(),
   };
 
   async function api(path, opts = {}) {
@@ -93,11 +93,18 @@ function mount(root, host, base) {
     if (!r.ok) throw new Error(data.error || r.statusText);
     return data;
   }
-  function toast(text) {
+  function toast(text, action) {
+    $$('.toast').forEach((x) => x.remove());
     const t = document.createElement('div');
     t.className = 'toast'; t.textContent = text;
+    if (action) {
+      const b = document.createElement('button');
+      b.className = 'toast-btn'; b.textContent = action.label;
+      b.onclick = () => { t.remove(); action.run(); };
+      t.append(' ', b);
+    }
     app().append(t);
-    setTimeout(() => t.remove(), 2600);
+    setTimeout(() => t.remove(), action ? 6000 : 2600);
   }
   const emit = (name, detail) => host.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }));
   const acc = (id) => state.status.accounts.find((a) => a.id === id) || { label: id, color: '#999' };
@@ -172,9 +179,10 @@ function mount(root, host, base) {
     renderBoardHead(true);
     try {
       const q = new URLSearchParams({ account: state.account, q: state.topicQuery });
+      if (state.showDismissed) q.set('dismissed', '1');
       if (fresh) q.set('fresh', '1');
       const r = await api(`/api/topics?${q}`);
-      state.topics = r.topics; state.topicErrors = r.errors;
+      state.topics = r.topics; state.topicErrors = r.errors; state.dismissedCount = r.dismissedCount || 0;
       renderTopics();
     } catch (e) {
       $('#topicList').innerHTML = `<p class="muted">Não consegui carregar: ${esc(e.message)}</p>`;
@@ -186,8 +194,10 @@ function mount(root, host, base) {
     const head = $('.board-head'); if (!head) return;
     const n = state.topics.length, unread = state.topics.filter((t) => t.unread).length, waiting = state.topics.filter((t) => t.ai?.needsReply ?? t.lastFromOther).length;
     const label = state.account === 'all' ? 'Todas as caixas' : acc(state.account).label;
-    head.innerHTML = `<h1>${esc(label)}</h1>
-      <span class="muted">${loading ? spin('a atualizar') : `${n} conversas · ${unread} por ler · ${waiting} à espera de resposta`}</span>
+    const dz = state.dismissedCount;
+    head.innerHTML = `<h1>${esc(label)}${state.showDismissed ? ' · arrumados' : ''}</h1>
+      <span class="muted">${loading ? spin('a atualizar') : state.showDismissed ? `${n} arrumados` : `${n} conversas · ${unread} por ler · ${waiting} à espera de resposta`}</span>
+      ${loading ? '' : state.showDismissed ? `<button class="linkbtn" data-t="showDismissed">← voltar aos tópicos</button>` : dz ? `<button class="linkbtn" data-t="showDismissed">${dz} arrumado${dz > 1 ? 's' : ''}</button>` : ''}
       <span class="grow"></span>
       <input type="search" id="topicSearch" placeholder="Pesquisar tópicos  /" value="${esc(state.topicQuery)}" aria-label="Pesquisar tópicos" />
       <button class="icon" data-t="compose" title="Nova mensagem (c)" aria-label="Nova mensagem">＋</button>
@@ -212,7 +222,7 @@ function mount(root, host, base) {
         <p class="t-summary selectable">${esc(summary)}</p>
         <div class="t-foot">${foot.map((f) => `<span>${f}</span>`).join('')}</div>
       </div>
-      ${state.open.has(t.id) ? `<div class="t-body" id="body-${cssId(t.id)}">${spin('A abrir a conversa…')}</div>` : `<div class="t-actions" style="padding:0 22px 16px"><button class="btn" data-t="toggle">Ler e responder</button><button class="btn" data-t="focus">Conversa completa</button></div>`}
+      ${state.open.has(t.id) ? `<div class="t-body" id="body-${cssId(t.id)}">${spin('A abrir a conversa…')}</div>` : `<div class="t-actions" style="padding:0 22px 16px"><button class="btn" data-t="toggle">Ler e responder</button><button class="btn" data-t="focus">Conversa completa</button><span class="grow"></span>${state.showDismissed ? `<button class="btn" data-t="undismiss">Repor</button>` : `<button class="btn" data-t="dismiss" title="Arrumar (e) — volta se chegar mensagem nova">Arrumar</button>`}</div>`}
     </article>`;
   }
   const cssId = (id) => id.replace(/[^a-z0-9]/gi, '_');
@@ -331,9 +341,10 @@ function mount(root, host, base) {
   }
 
   // ---------- modo focado ----------
-  function closeFocus() { $('.focus')?.remove(); }
+  function closeFocus() { $('.focus')?.remove(); state.focusId = null; }
   async function openFocus(id, single) {
     closeFocus();
+    state.focusId = topicById(id) ? id : null;
     const f = document.createElement('div');
     f.className = 'focus'; f.tabIndex = -1;
     f.innerHTML = `<div class="focus-inner">${spin('A abrir…')}</div>`;
@@ -344,7 +355,7 @@ function mount(root, host, base) {
       const title = t.ai?.title || th.subject.replace(/^(re|fwd?):\s*/i, '');
       $('.focus-inner', f).innerHTML = `
         <div class="focus-bar">${dot(th.account)} ${esc(acc(th.account).label)} · ${th.messages.length} mensage${th.messages.length > 1 ? 'ns' : 'm'}<span class="grow"></span>
-          <button class="btn" data-f="toggle">Ver na caixa</button><button class="close" data-f="close" aria-label="Fechar (Esc)" title="Fechar (Esc)">×</button></div>
+          ${topicById(id) && !state.showDismissed ? `<button class="btn" data-f="dismiss">Arrumar</button>` : ''}<button class="btn" data-f="toggle">Ver na caixa</button><button class="close" data-f="close" aria-label="Fechar (Esc)" title="Fechar (Esc)">×</button></div>
         <h1 class="selectable">${esc(title)}</h1>
         <div class="sub selectable">${esc(t.ai?.summary || th.subject)}</div>
         ${th.messages.map((m) => { const [fresh, quoted] = splitQuote(textOf(m)); return `
@@ -359,6 +370,7 @@ function mount(root, host, base) {
       f.addEventListener('click', (e) => {
         const b = e.target.closest('[data-f]');
         if (b?.dataset.f === 'close') closeFocus();
+        if (b?.dataset.f === 'dismiss') { closeFocus(); dismissTopic(id); }
         if (b?.dataset.f === 'toggle') { const last = th.messages.at(-1); setMode('classic'); openMessage({ account: th.account, uid: last.uid, folder: last.folder }); }
       });
     } catch (e) { $('.focus-inner', f).innerHTML = `<button class="close" data-f="close">×</button><p>Não consegui abrir: ${esc(e.message)}</p>`; f.onclick = (e) => e.target.closest('[data-f=close]') && closeFocus(); }
@@ -367,6 +379,22 @@ function mount(root, host, base) {
   $('#reader').addEventListener('keydown', (e) => {
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('.t-head')) { e.preventDefault(); toggleTopic(e.target.closest('.topic').dataset.id); }
   });
+  async function dismissTopic(id, undo = false) {
+    const el = $(`.topic[data-id="${CSS.escape(id)}"]`);
+    const t = topicById(id);
+    if (!t) return;
+    el?.classList.add('leaving');
+    try {
+      await api('/api/topics/dismiss', { method: 'POST', body: { id, undo } });
+      state.topics = state.topics.filter((x) => x.id !== id);
+      state.open.delete(id);
+      state.dismissedCount += undo ? -1 : 1;
+      setTimeout(() => { el?.remove(); renderBoardHead(false); if (!state.topics.length) renderTopics(); }, 160);
+      if (!undo) toast('Tópico arrumado', { label: 'Desfazer', run: async () => { await api('/api/topics/dismiss', { method: 'POST', body: { id, undo: true } }); loadTopics(); } });
+      else toast('Tópico reposto');
+    } catch (e) { el?.classList.remove('leaving'); toast('Erro: ' + e.message); }
+  }
+
   function toggleTopic(id) {
     if (state.open.has(id)) state.open.delete(id); else state.open.add(id);
     const el = $(`.topic[data-id="${CSS.escape(id)}"]`);
@@ -384,6 +412,9 @@ function mount(root, host, base) {
     if (b.dataset.t === 'toggle') { if (window.getSelection?.().toString() || root.getSelection?.()?.toString()) return; toggleTopic(id); }
     if (b.dataset.t === 'focus') { e.preventDefault(); openFocus(id); }
     if (b.dataset.t === 'refresh') { state.threads.clear(); loadTopics(true); }
+    if (b.dataset.t === 'dismiss') dismissTopic(id);
+    if (b.dataset.t === 'undismiss') dismissTopic(id, true);
+    if (b.dataset.t === 'showDismissed') { state.showDismissed = !state.showDismissed; state.open.clear(); $('#reader').innerHTML = ''; loadTopics(); }
     if (b.dataset.t === 'compose') compose();
   });
   let tSearch;
@@ -1055,6 +1086,10 @@ function mount(root, host, base) {
     if (k === '/') { e.preventDefault(); (state.mode === 'topics' ? $('#topicSearch') : $('#search'))?.focus(); return; }
     if (k === 'c') return compose();
     if (k === 'v') return setMode(state.mode === 'topics' ? 'classic' : 'topics');
+    if (k === 'e' && state.mode === 'topics' && !state.showDismissed) {
+      const id = ($('.focus') ? state.focusId : null) || tgt.closest?.('.topic')?.dataset.id || [...state.open].at(-1);
+      if (id) { closeFocus(); return dismissTopic(id); }
+    }
     if (state.mode === 'classic') {
       if (k === 'j') select(state.index + 1);
       else if (k === 'k') select(Math.max(0, state.index - 1));

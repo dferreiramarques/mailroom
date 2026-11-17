@@ -10,6 +10,7 @@ Em cada cartão podes:
 
 - **Ler e responder**: o cartão abre com a última mensagem e uma resposta sugerida. Podes alternar entre sugestões, pedir outra ("aceito, mas só em fevereiro") ou **Limpar** e escrever do zero.
 - **Conversa completa**: o modo focado mostra a conversa inteira em leitura limpa, com a resposta no fim.
+- **Arrumar** (`e`): o tópico sai da vista e fica lido; volta sozinho se chegar uma mensagem nova nessa conversa. Os arrumados ficam numa lista própria, de onde se podem repor.
 - **Mudar de vista** (`v`, ou o seletor no topo): passas para a vista clássica com lista e leitor. As pastas, os rascunhos e os workflows continuam lá.
 
 **Pesquisa rápida**: seleciona uma palavra ou expressão num e-mail, carrega no botão direito e escolhe *Pesquisar e resumir com IA*. O mailroom procura em todas as caixas e resume o que sabe sobre isso: factos, pessoas e e-mails relacionados. Se o modelo acrescentar contexto geral, aparece separado do que vem dos teus e-mails.
@@ -102,7 +103,7 @@ Se a app estiver alojada (Railway, Render ou Fly) e faltar `APP_PASSWORD`, recus
 
 ## Atalhos
 
-`v` mudar de vista · `/` pesquisar · `c` nova mensagem · `Esc` fechar
+`v` mudar de vista · `e` arrumar tópico · `/` pesquisar · `c` nova mensagem · `Esc` fechar
 Vista clássica: `j`/`k` navegar · `r` responder · `s` resumir · `g` sugerir respostas
 
 ## Integrar noutras plataformas
