@@ -18,6 +18,7 @@ import { createAI } from './lib/ai.js';
 import { PRESETS, listModels } from './lib/providers.js';
 import { buildTopics } from './lib/threads.js';
 import { memoryStore, fileStore } from './lib/stores.js';
+import { createPipeline } from './lib/pipeline.js';
 
 export { memoryStore, fileStore, PRESETS };
 
@@ -78,7 +79,7 @@ export function createMailModule(opts = {}) {
         get: async (acc, uid, folder) => demo.demoGet(acc.id, uid, folder),
         many: async (acc, refs) => refs.map((r) => demo.demoGet(acc.id, r.uid, r.folder)),
         seen: async (acc, uid, folder, on) => demo.demoSeen(acc.id, uid, on),
-        send: async (acc, m) => { console.log('[demo] enviaria:', m.to, m.subject); return { messageId: 'demo' }; },
+        send: async (acc, m) => { console.log('[demo] enviaria:', m.to, m.subject, m.attachments?.length ? `(+${m.attachments.length} anexo/s)` : ''); return demo.demoSend(acc.id, m); },
       };
   const real = {
         list: (acc, o) => mail.listMessages(acc, o),
@@ -95,7 +96,7 @@ export function createMailModule(opts = {}) {
   const remember = (k, v) => { summaryCache.set(k, v); if (summaryCache.size > 1000) summaryCache.delete(summaryCache.keys().next().value); };
 
   const router = express.Router();
-  router.use(express.json({ limit: '2mb' }));
+  router.use(express.json({ limit: '30mb' })); // anexos vão em base64
   if (opts.auth) router.use(opts.auth);
 
   const asset = (f) => fs.readFileSync(path.join(CLIENT_DIR, f), 'utf8');
@@ -143,11 +144,14 @@ export function createMailModule(opts = {}) {
   }));
 
   router.post('/api/send', h(async (req) => {
-    const { account, to, cc, bcc, subject, text, inReplyTo, references, draftId } = req.body;
+    const { account, to, cc, bcc, subject, text, inReplyTo, references, draftId, attachments } = req.body;
     if (!to || !subject) throw Object.assign(new Error('Falta destinatário ou assunto'), { status: 400 });
     const acc = accById(account);
-    const r = await io.send(acc, { to, cc, bcc, subject, text, inReplyTo, references });
+    const draft = draftId ? (await store.getDrafts()).find((x) => x.id === draftId) : null;
+    const files = (attachments || draft?.attachments || []).map((a) => ({ filename: a.filename, contentType: a.contentType, content: Buffer.from(a.data || '', 'base64') }));
+    const r = await io.send(acc, { to, cc, bcc, subject, text, inReplyTo, references, attachments: files.length ? files : undefined });
     if (draftId) await editDrafts((d) => ({ drafts: d.filter((x) => x.id !== draftId) }));
+    if (draft?.contactId) await pipeline.onSent({ ...draft, subject, text }, r.messageId).catch((e) => console.error('[funil]', e.message));
     opts.onSend?.(acc, { to, subject });
     return { ok: true, ...r };
   }));
@@ -185,12 +189,15 @@ export function createMailModule(opts = {}) {
         }
       } catch (e) { errors.push(`IA: ${e.message}`); }
     }
+    let funnel = new Map();
+    try { funnel = await pipeline.lookup(); } catch {}
     return {
       errors,
       dismissedCount,
       topics: topics.map(({ messages, ...t }) => ({
         ...t,
         ai: summaryCache.get(`${t.id}|${t.lastMessageId}`) || null,
+        funnel: t.people.map((p) => { const a = String(p.address || '').toLowerCase(); return funnel.get(a) || funnel.get('@' + a.split('@')[1]); }).find(Boolean) || null,
         messages: messages.map(({ preview, ...m }) => m),
       })),
     };
@@ -407,6 +414,16 @@ export function createMailModule(opts = {}) {
       return { ok: true };
     }));
   }
+
+  // ---------- funil de prospeção ----------
+  const pipeline = createPipeline({ store, io, accById, accs, ai, getSettings, addDrafts, editDrafts });
+  router.get('/api/pipeline', h(async (req) => { if (req.query.sync) await pipeline.sync(true); return pipeline.overview(); }));
+  router.put('/api/pipeline/streams/:id', h((req) => pipeline.updateStream(req.params.id, req.body || {})));
+  router.post('/api/pipeline/contacts', h((req) => pipeline.addContacts(req.body.stream, Array.isArray(req.body.contacts) ? req.body.contacts.slice(0, 500) : [req.body])));
+  router.put('/api/pipeline/contacts/:id', h((req) => pipeline.updateContact(req.params.id, req.body || {})));
+  router.delete('/api/pipeline/contacts/:id', h((req) => pipeline.removeContact(req.params.id)));
+  router.post('/api/pipeline/plan', h((req) => pipeline.planWeek(req.body.stream, req.body.count)));
+  router.post('/api/pipeline/followups', h((req) => pipeline.prepareFollowups(req.body.stream)));
 
   // ---------- atualizações (fornecidas pela app anfitriã) ----------
   router.get('/api/update', h(async (req) => (opts.update ? opts.update.check(Boolean(req.query.fresh)) : { available: false })));

@@ -96,6 +96,17 @@ ${JSON.stringify(contacts)}
 
 Devolve [{"to": "email", "name": "nome", "subject": "...", "body": "...", "angulo": "1 frase sobre porquê este ângulo"}].`, { maxTokens: 6000 }), mock.pitch);
 
+  const followups = wrap((p, s, { items, language = 'auto', account, materials }) => askJson(p, s, `Escreve um follow-up curto para cada pessoa abaixo, que recebeu um primeiro e-mail e não respondeu.
+Regras: 40-90 palavras; retoma o e-mail original numa frase, sem o repetir; acrescenta um único elemento novo e útil (um link dos materiais, um exemplo concreto ou uma pergunta simples) sem inventar factos; termina com um pedido fácil de responder (sim/não ou uma data); tom cordial e sem pressão; nunca culpes a pessoa por não ter respondido.
+Língua: a do e-mail original${language !== 'auto' ? ` (ou ${language})` : ''}.
+Materiais disponíveis: ${materials || '—'}
+${account?.signature ? `Assinatura:\n${account.signature}` : ''}
+
+Contactos e e-mail original (JSON):
+${JSON.stringify(items)}
+
+Devolve [{"to": "email", "subject": "assunto (será usado Re: do original quando existir)", "body": "texto", "nota": "1 frase: o elemento novo que acrescentaste"}].`, { maxTokens: 5000 }), mock.followups);
+
   const publish = wrap((p, s, { brief, formats = ['email'], language = 'pt-PT' }) => askJson(p, s, `Prepara uma publicação a partir deste briefing, adaptada a cada formato (cada canal tem o seu ritmo).
 Língua: ${language}. Não inventes datas, preços ou links: usa [marcadores] quando faltar informação.
 
@@ -138,7 +149,7 @@ Devolve [{"format": "id", "subject": "assunto ou título, ou null", "body": "tex
 
   return {
     enabled: async () => Boolean(await provider()),
-    summarize, replies, topics, research, triage, pitch, publish, runAgent, test,
+    summarize, replies, topics, research, triage, pitch, followups, publish, runAgent, test,
     publishFormats: Object.keys(FORMATS),
   };
 }
@@ -183,6 +194,7 @@ const mock = {
   research: (q, hits) => ({ summary: `(simulado) Encontrei ${hits.length} e-mail(s) que mencionam "${q}". Configura um fornecedor de IA nas Definições para um resumo real.`, facts: hits.slice(0, 3).map((h) => `${h.subject} (${h.date.slice(0, 10)})`), people: [...new Set(hits.map((h) => h.from))].slice(0, 4), refs: hits.slice(0, 5).map((h) => h.ref), general: null }),
   triage: (list) => ({ resumo: `(simulado) ${list.length} mensagens por ler.`, itens: list.map((m, i) => ({ ref: `${m.account}:${m.uid}`, prioridade: i === 0 ? 'alta' : 'média', acao: 'Ler e responder' })) }),
   pitch: ({ contacts, brief }) => contacts.map((c) => ({ to: c.email, name: c.name, subject: `(simulado) ${brief.split('\n')[0].slice(0, 50)}`, body: `Olá ${c.name || ''},\n\n[pitch personalizado com base em: ${c.notes || '—'}]\n\nDavid`, angulo: 'Simulado — configura um fornecedor de IA.' })),
+  followups: ({ items }) => items.map((c) => ({ to: c.email, subject: `Re: ${c.originalSubject || 'o meu e-mail anterior'}`, body: `Olá ${c.name?.split(' ')[0] || ''},\n\nVolto só a este assunto, caso o meu e-mail anterior se tenha perdido. [elemento novo]\n\nFaz sentido falarmos 20 minutos?\n\nDavid`, nota: 'Simulado — configura um fornecedor de IA.' })),
   publish: ({ formats, brief }) => formats.map((f) => ({ format: f, subject: ['email', 'newsletter', 'blog'].includes(f) ? '(simulado) Título' : null, body: `[${f}] ${brief.slice(0, 200)}` })),
   agent: async (goal, tools, onStep) => {
     onStep?.({ tool: 'list_messages', input: { account: 'bitnik', folder: 'Sent' } });

@@ -6,11 +6,15 @@ import path from 'node:path';
 export function memoryStore(initial = {}) {
   let drafts = initial.drafts || [];
   let settings = initial.settings || {};
+  const data = { ...(initial.data || {}) };
   return {
     getDrafts: async () => drafts,
     setDrafts: async (d) => { drafts = d; },
     getSettings: async () => settings,
     setSettings: async (s) => { settings = s; },
+    // Coleções genéricas (ex.: funil de contactos)
+    getData: async (k) => data[k],
+    setData: async (k, v) => { data[k] = v; },
   };
 }
 
@@ -23,5 +27,7 @@ export function fileStore(dir) {
     setDrafts: async (d) => write('drafts.json', d),
     getSettings: async () => read('settings.json', {}),
     setSettings: async (s) => write('settings.json', s),
+    getData: async (k) => read(`${k}.json`, undefined),
+    setData: async (k, v) => write(`${k}.json`, v),
   };
 }

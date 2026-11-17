@@ -46,6 +46,10 @@ const SHELL = `
       <button class="nav" data-view="drafts">Rascunhos <span class="count" id="draftCount"></span></button>
     </div>
     <div class="group">
+      <div class="group-label">Prospeção</div>
+      <button class="nav" data-view="funnel">Funil <span class="count" id="funnelCount"></span></button>
+    </div>
+    <div class="group">
       <div class="group-label">Assistente</div>
       <button class="nav" data-view="triage">Triagem</button>
       <button class="nav" data-view="pitch">Pitch</button>
@@ -253,7 +257,7 @@ function mount(root, host, base) {
     ].filter(Boolean);
     return `<article class="topic ${t.unread ? 'unread' : ''} ${state.open.has(t.id) ? 'open' : ''}" data-id="${esc(t.id)}">
       <div class="t-head" data-t="toggle" role="button" tabindex="0" aria-expanded="${state.open.has(t.id)}">
-        <div class="t-meta">${t.unread ? '<span class="new">nova</span>' : ''}${dot(t.account)} <span>${esc(acc(t.account).label)}</span><span>·</span><span>${esc(who(t.people))}</span><span>·</span><span>${ago(t.lastDate)}</span>${prio ? `<span class="pill ${esc(prio)}">${esc(prio)}</span>` : ''}</div>
+        <div class="t-meta">${t.unread ? '<span class="new">nova</span>' : ''}${dot(t.account)} <span>${esc(acc(t.account).label)}</span><span>·</span><span>${esc(who(t.people))}</span><span>·</span><span>${ago(t.lastDate)}</span>${prio ? `<span class="pill ${esc(prio)}">${esc(prio)}</span>` : ''}${t.funnel ? `<span class="pill funnel" title="${esc(t.funnel.streamName)}">${esc(t.funnel.streamName.split(' · ')[0])} · ${esc(t.funnel.label)}</span>` : ''}</div>
         <h2 class="t-title selectable">${esc(title)}</h2>
         <p class="t-summary selectable">${esc(summary)}</p>
         <div class="t-foot">${foot.map((f) => `<span>${f}</span>`).join('')}</div>
@@ -391,6 +395,7 @@ function mount(root, host, base) {
       const title = t.ai?.title || th.subject.replace(/^(re|fwd?):\s*/i, '');
       $('.focus-inner', f).innerHTML = `
         <div class="focus-bar">${dot(th.account)} ${esc(acc(th.account).label)} · ${th.messages.length} mensage${th.messages.length > 1 ? 'ns' : 'm'}<span class="grow"></span>
+          ${topicById(id)?.funnel ? `<button class="btn" data-f="funnel">Ver no funil</button>` : topicById(id) ? `<button class="btn" data-f="addFunnel">＋ Funil</button>` : ''}
           ${topicById(id) && !state.showDismissed ? `<button class="btn" data-f="dismiss">Arrumar</button>` : ''}<button class="btn" data-f="toggle">Ver na caixa</button><button class="close" data-f="close" aria-label="Fechar (Esc)" title="Fechar (Esc)">×</button></div>
         <h1 class="selectable">${esc(title)}</h1>
         <div class="sub selectable">${esc(t.ai?.summary || th.subject)}</div>
@@ -407,6 +412,8 @@ function mount(root, host, base) {
         const b = e.target.closest('[data-f]');
         if (b?.dataset.f === 'close') closeFocus();
         if (b?.dataset.f === 'dismiss') { closeFocus(); dismissTopic(id); }
+        if (b?.dataset.f === 'funnel') { const t = topicById(id); closeFocus(); openView('funnel'); state.funnelStream = t.funnel.stream; state.funnelOpen = t.funnel.contactId; }
+        if (b?.dataset.f === 'addFunnel') addToFunnelMenu(b, topicById(id));
         if (b?.dataset.f === 'toggle') { const last = th.messages.at(-1); setMode('classic'); openMessage({ account: th.account, uid: last.uid, folder: last.folder }); }
       });
     } catch (e) { $('.focus-inner', f).innerHTML = `<button class="close" data-f="close">×</button><p>Não consegui abrir: ${esc(e.message)}</p>`; f.onclick = (e) => e.target.closest('[data-f=close]') && closeFocus(); }
@@ -679,6 +686,11 @@ function mount(root, host, base) {
       </div>
       <div class="field"><label for="cSubj">Assunto</label><input id="cSubj" name="subject" value="${esc(d.subject || '')}" required /></div>
       <div class="field"><label for="cText">Mensagem</label><textarea id="cText" name="text" class="tall">${esc(d.text || '')}</textarea></div>
+      <div class="attachbox">
+        <div id="attList" class="att-list"></div>
+        <label class="btn att-add">📎 Anexar ficheiros<input type="file" id="attInput" multiple hidden /></label>
+        <span class="hint" style="margin:0">Até 20 MB no total.</span>
+      </div>
       ${d.draftId ? `<label class="checks" style="margin-bottom:14px"><input type="checkbox" name="reviewed" ${d.reviewed ? 'checked' : ''}/> Revisto e pronto a enviar</label>` : ''}
       <div class="actions">
         <button class="btn primary" type="submit" id="sendBtn">Enviar</button>
@@ -688,7 +700,26 @@ function mount(root, host, base) {
       </div>
     </form>`;
     const f = $('#composeForm');
-    const val = () => ({ ...Object.fromEntries(new FormData(f)), reviewed: f.reviewed?.checked || false, inReplyTo: d.inReplyTo, references: d.references, draftId: d.draftId });
+    // Anexos: lidos para base64 no browser e guardados com o rascunho.
+    let atts = [...(d.attachments || [])];
+    const fmtSize = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+    const renderAtts = () => {
+      $('#attList').innerHTML = atts.map((a, i) => `<span class="att">${esc(a.filename)} <span class="muted">${fmtSize(a.size || 0)}</span><button type="button" class="att-x" data-rm="${i}" aria-label="Remover ${esc(a.filename)}">×</button></span>`).join('');
+      $$('[data-rm]', $('#attList')).forEach((b) => (b.onclick = () => { atts.splice(Number(b.dataset.rm), 1); renderAtts(); }));
+    };
+    renderAtts();
+    $('#attInput').onchange = async (e) => {
+      // Guarda a referência já: dentro do Shadow DOM, e.target deixa de existir depois do primeiro await.
+      const input = e.currentTarget;
+      for (const file of [...input.files]) {
+        const total = atts.reduce((n, a) => n + (a.size || 0), 0) + file.size;
+        if (total > 20 * 1048576) { toast(`“${file.name}” ultrapassa os 20 MB no total`); continue; }
+        const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(file); });
+        atts.push({ filename: file.name, contentType: file.type || 'application/octet-stream', size: file.size, data });
+      }
+      input.value = ''; renderAtts();
+    };
+    const val = () => ({ ...Object.fromEntries(new FormData(f)), reviewed: f.reviewed?.checked || false, inReplyTo: d.inReplyTo, references: d.references, draftId: d.draftId, attachments: atts });
     let armed = null;
     f.onsubmit = async (e) => {
       e.preventDefault();
@@ -709,7 +740,7 @@ function mount(root, host, base) {
     };
     $('#saveDraft').onclick = async () => {
       const v = val();
-      const body = { account: v.account, to: v.to, cc: v.cc, bcc: v.bcc, subject: v.subject, text: v.text, reviewed: v.reviewed, inReplyTo: v.inReplyTo, references: v.references };
+      const body = { account: v.account, to: v.to, cc: v.cc, bcc: v.bcc, subject: v.subject, text: v.text, reviewed: v.reviewed, inReplyTo: v.inReplyTo, references: v.references, attachments: atts };
       if (d.draftId) await api(`/api/drafts/${d.draftId}`, { method: 'PUT', body });
       else { const nd = await api('/api/drafts', { method: 'POST', body }); d.draftId = nd.id; }
       await refreshDrafts(); if (state.view === 'drafts') renderDraftList();
@@ -766,7 +797,7 @@ function mount(root, host, base) {
     app().classList.add('reading');
     if (view === 'drafts') { renderDraftList(); renderDraftsHome(); return; }
     if (state.mode === 'classic' && !state.items.length) loadList();
-    ({ triage: viewTriage, pitch: viewPitch, publish: viewPublish, agent: viewAgent, settings: viewSettings })[view]?.();
+    ({ funnel: viewFunnel, triage: viewTriage, pitch: viewPitch, publish: viewPublish, agent: viewAgent, settings: viewSettings })[view]?.();
   }
 
   async function viewTriage() {
@@ -914,6 +945,270 @@ function mount(root, host, base) {
         const t = $('#toDrafts'); if (t) t.onclick = () => openView('drafts');
       } catch (err) { out.textContent = 'Erro: ' + err.message; }
       $('#runAgent').disabled = false;
+    };
+  }
+
+  // =====================================================================
+  // Funil de prospeção
+  // =====================================================================
+  const STATUS_ORDER = ['respondeu', 'conversa', 'novo', 'contactado', 'followup', 'concluido', 'recusou', 'sem_resposta'];
+  const CLOSED = new Set(['concluido', 'recusou', 'sem_resposta']);
+  const dayFmt = (d) => new Date(d).toLocaleDateString('pt-PT', { day: 'numeric', month: 'short' });
+  const dueLabel = (d) => {
+    const days = Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 864e5);
+    return days < 0 ? `<span class="late">atrasado ${-days} dia${days < -1 ? 's' : ''}</span>` : days === 0 ? '<b>hoje</b>' : days === 1 ? 'amanhã' : dayFmt(d);
+  };
+
+  async function refreshFunnelCount() {
+    try {
+      const r = await api('/api/pipeline');
+      const n = r.week.reduce((a, w) => a + w.replies + w.followDue + w.actions, 0);
+      $('#funnelCount').textContent = n || '';
+      return r;
+    } catch { return null; }
+  }
+
+  async function viewFunnel(opts = {}) {
+    const reader = $('#reader');
+    if (!$('#funnelPane')) reader.innerHTML = `<div class="pane wide" id="funnelPane">${backBtn()}<h1>Funil</h1><div id="fBody">${spin('A ler as caixas…')}</div></div>`;
+    let r;
+    try { r = await api(`/api/pipeline${opts.sync ? '?sync=1' : ''}`); } catch (e) { $('#fBody').innerHTML = `<p>Erro: ${esc(e.message)}</p>`; return; }
+    state.pipeline = r;
+    $('#funnelCount').textContent = r.week.reduce((a, w) => a + w.replies + w.followDue + w.actions, 0) || '';
+    if (!state.funnelStream || !r.streams.some((x) => x.id === state.funnelStream)) state.funnelStream = r.streams[0]?.id;
+    const s = r.streams.find((x) => x.id === state.funnelStream);
+    const w = r.week.find((x) => x.id === s.id);
+    const cs = r.contacts.filter((c) => c.stream === s.id);
+    const drafts = state.drafts.filter((d) => d.stream === s.id);
+    const filter = state.funnelFilter || 'abertos';
+    const shown = cs.filter((c) => (filter === 'todos' ? true : filter === 'abertos' ? !CLOSED.has(c.status) : filter === 'fechados' ? CLOSED.has(c.status) : c.status === filter))
+      .sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) || new Date(a.nextAction?.due || a.createdAt) - new Date(b.nextAction?.due || b.createdAt));
+    const attention = cs.filter((c) => c.status === 'respondeu' || (c.nextAction?.due && !CLOSED.has(c.status) && c.status !== 'contactado' && c.status !== 'followup' && new Date(c.nextAction.due) <= new Date(Date.now() + 12 * 36e5)));
+    const pct = Math.min(100, Math.round((w.contactedThisWeek / Math.max(1, w.target)) * 100));
+    const planLabel = w.toPlan === 0 ? (w.pitchDrafts ? `${w.pitchDrafts} pitch(es) à espera de revisão` : 'Meta da semana cumprida')
+      : w.available <= 0 ? 'Sem contactos por contactar — adiciona mais em baixo'
+      : `Preparar ${Math.min(w.toPlan, w.available)} pitch${Math.min(w.toPlan, w.available) > 1 ? 'es' : ''} da semana`;
+
+    $('#fBody').innerHTML = `
+      <div class="seg" role="tablist">${r.streams.map((x) => { const wx = r.week.find((y) => y.id === x.id); const n = wx.replies + wx.followDue + wx.actions; return `<button role="tab" data-stream="${esc(x.id)}" class="${x.id === s.id ? 'on' : ''}">${esc(x.name)}${n ? ` <span class="badge">${n}</span>` : ''}</button>`; }).join('')}</div>
+
+      <section class="card week">
+        <div class="week-head">
+          <div><div class="muted" style="font-size:13px">Semana de ${dayFmt(w.weekStart)}</div><div class="week-num"><b>${w.contactedThisWeek}</b> / ${w.target} contactados</div></div>
+          <div class="week-stats">
+            <span><b>${w.counts.novo}</b> por contactar</span>
+            <span><b>${w.counts.contactado + w.counts.followup}</b> à espera de resposta</span>
+            <span><b>${w.counts.respondeu + w.counts.conversa}</b> em conversa</span>
+          </div>
+        </div>
+        <div class="progress"><div style="width:${pct}%"></div></div>
+        <div class="actions" style="margin:12px 0 0">
+          <button class="btn primary" data-fx="plan" ${w.toPlan && w.available > 0 ? '' : 'disabled'}>${planLabel}</button>
+          <button class="btn" data-fx="follow" ${w.followDue ? '' : 'disabled'}>${w.followDue ? `Preparar ${w.followDue} follow-up${w.followDue > 1 ? 's' : ''}` : w.followDrafts ? `${w.followDrafts} follow-up(s) à espera de revisão` : 'Sem follow-ups no prazo'}</button>
+          ${drafts.length ? `<button class="btn" data-fx="review">Rever e enviar (${drafts.length})</button>` : ''}
+          <span class="grow"></span>
+          <button class="icon" data-fx="sync" title="Verificar respostas agora" aria-label="Verificar respostas agora">↻</button>
+        </div>
+        <div id="fOut"></div>
+      </section>
+
+      ${attention.length ? `<h2>Precisa de ti</h2>${attention.map((c) => `
+        <div class="card attn" data-cid="${esc(c.id)}">
+          <div class="c-head"><span><b style="color:var(--ink)">${esc(c.name || c.email)}</b>${c.org ? ` · ${esc(c.org)}` : ''}</span><span class="pill st-${esc(c.status)}">${esc(r.statuses[c.status])}</span></div>
+          ${c.status === 'respondeu' && c.reply ? `<div class="c-body selectable">“${esc(c.reply.snippet || c.reply.subject)}”</div>` : ''}
+          ${c.nextAction ? `<div class="muted" style="margin-top:6px">Próxima ação: ${esc(c.nextAction.text)} · ${dueLabel(c.nextAction.due)}</div>` : ''}
+          <div class="actions" style="margin:10px 0 0">
+            ${c.reply?.uid ? `<button class="btn primary" data-fx="openReply" data-cid="${esc(c.id)}">Ler e responder</button>` : ''}
+            ${c.status === 'respondeu' ? `<button class="btn" data-fx="status" data-to="conversa" data-cid="${esc(c.id)}">Em conversa</button>` : ''}
+            <button class="btn" data-fx="status" data-to="concluido" data-cid="${esc(c.id)}">Concluído</button>
+            <button class="btn" data-fx="status" data-to="recusou" data-cid="${esc(c.id)}">Recusou</button>
+            <button class="btn" data-fx="contact" data-cid="${esc(c.id)}">Detalhes</button>
+          </div>
+        </div>`).join('')}` : ''}
+
+      <h2>Contactos <span class="muted" style="font-weight:400">${cs.length}</span></h2>
+      <div class="chips">${[['abertos', 'Abertos'], ['novo', 'Por contactar'], ['contactado', 'Contactados'], ['followup', 'Follow-up'], ['respondeu', 'Responderam'], ['conversa', 'Em conversa'], ['fechados', 'Fechados'], ['todos', 'Todos']]
+        .map(([k, l]) => `<button class="chip ${filter === k ? 'on' : ''}" data-ff="${k}">${l}</button>`).join('')}</div>
+      ${shown.length ? `<div class="ctable">${shown.map((c) => `
+        <button class="crow" data-fx="contact" data-cid="${esc(c.id)}">
+          <span class="cname"><b>${esc(c.name || c.email)}</b><span class="muted">${esc([c.org, c.email].filter(Boolean).join(' · '))}</span></span>
+          <span class="pill st-${esc(c.status)}">${esc(r.statuses[c.status])}</span>
+          <span class="cnext muted">${c.nextAction && !CLOSED.has(c.status) ? `${esc(c.nextAction.text)} · ${dueLabel(c.nextAction.due)}` : c.firstContactAt ? `contactado ${dayFmt(c.firstContactAt)}` : ''}${drafts.some((d) => d.contactId === c.id) ? ' · <span class="tag">rascunho</span>' : ''}</span>
+        </button>`).join('')}</div>` : `<p class="muted">${cs.length ? 'Nenhum contacto neste filtro.' : 'Ainda não há contactos nesta frente. Adiciona os primeiros em baixo.'}</p>`}
+
+      <details class="card" ${cs.length ? '' : 'open'}>
+        <summary><b>Adicionar contactos</b></summary>
+        <form id="addForm" style="margin-top:12px">
+          <div class="field"><label for="addList">Um por linha: nome, e-mail; organização; notas</label>
+          <textarea id="addList" required placeholder="Ana Lopes, ana@editora.pt; Editora Exemplo; publica party games e quer versões digitais&#10;Direção, direcao@colegio.pt; Colégio Exemplo; tem clube de robótica"></textarea></div>
+          <div class="hint" id="addHint">As notas ajudam a IA a escolher o ângulo de cada pitch.</div>
+          <div class="actions" style="margin:0"><button class="btn primary">Adicionar a ${esc(s.name)}</button></div>
+        </form>
+      </details>
+
+      <details class="card">
+        <summary><b>Definições desta frente</b> <span class="muted">· meta ${s.weeklyTarget}/semana · follow-up ao fim de ${s.followUpDays} dias · fecha ${s.closeAfterDays} dias depois</span></summary>
+        <form id="streamForm" style="margin-top:12px">
+          <div class="row">
+            <div class="field"><label for="sfName">Nome</label><input id="sfName" name="name" value="${esc(s.name)}" /></div>
+            <div class="field"><label for="sfAcc">Enviar de</label><select id="sfAcc" name="account">${state.status.accounts.map((a) => `<option value="${esc(a.id)}" ${a.id === s.account ? 'selected' : ''}>${esc(a.address)}</option>`).join('')}</select></div>
+          </div>
+          <div class="field"><label for="sfAud">Público</label><input id="sfAud" name="audience" value="${esc(s.audience || '')}" /></div>
+          <div class="field"><label for="sfBrief">Briefing do pitch</label><textarea id="sfBrief" name="brief" class="tall" style="min-height:180px">${esc(s.brief || '')}</textarea></div>
+          <p class="hint">Preenche os [marcadores]. A IA não inventa factos: o que não estiver aqui ou nas notas do contacto não entra no e-mail.</p>
+          <div class="field"><label for="sfMat">Materiais (links a usar nos e-mails)</label><input id="sfMat" name="materials" value="${esc(s.materials || '')}" /></div>
+          <div class="row">
+            <div class="field"><label for="sfLang">Língua</label><select id="sfLang" name="language">${[['auto', 'Automática por contacto'], ['pt-PT', 'Português'], ['en', 'Inglês']].map(([v, l]) => `<option value="${v}" ${v === s.language ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+            <div class="field"><label for="sfT">Contactos novos por semana</label><input id="sfT" name="weeklyTarget" type="number" min="0" max="100" value="${s.weeklyTarget}" /></div>
+            <div class="field"><label for="sfF">Follow-up ao fim de (dias)</label><input id="sfF" name="followUpDays" type="number" min="1" max="60" value="${s.followUpDays}" /></div>
+            <div class="field"><label for="sfC">Fechar sem resposta (dias após o follow-up)</label><input id="sfC" name="closeAfterDays" type="number" min="1" max="90" value="${s.closeAfterDays}" /></div>
+          </div>
+          <div class="actions" style="margin:0"><button class="btn primary">Guardar</button></div>
+        </form>
+      </details>`;
+
+    const pane = $('#funnelPane');
+    pane.onclick = async (e) => {
+      const tab = e.target.closest('[data-stream]');
+      if (tab) { state.funnelStream = tab.dataset.stream; return viewFunnel(); }
+      const ff = e.target.closest('[data-ff]');
+      if (ff) { state.funnelFilter = ff.dataset.ff; return viewFunnel(); }
+      const b = e.target.closest('[data-fx]'); if (!b) return;
+      const fx = b.dataset.fx, cid = b.dataset.cid;
+      if (fx === 'sync') { b.disabled = true; return viewFunnel({ sync: true }); }
+      if (fx === 'contact') return openContact(cid);
+      if (fx === 'status') { await api(`/api/pipeline/contacts/${cid}`, { method: 'PUT', body: { status: b.dataset.to } }); toast(`Marcado: ${r.statuses[b.dataset.to]}`); return viewFunnel(); }
+      if (fx === 'openReply') { const c = r.contacts.find((x) => x.id === cid); return openHit({ account: c.reply.account, uid: c.reply.uid, folder: 'INBOX' }); }
+      if (fx === 'review') return reviewDrafts(s);
+      if (fx === 'plan' || fx === 'follow') {
+        b.disabled = true; b.innerHTML = spin(fx === 'plan' ? 'A escrever os pitches…' : 'A escrever os follow-ups…');
+        try {
+          const made = await api(`/api/pipeline/${fx === 'plan' ? 'plan' : 'followups'}`, { method: 'POST', body: { stream: s.id } });
+          await refreshDrafts();
+          toast(`${made.length} rascunho(s) prontos para rever`);
+          await viewFunnel();
+          if (made.length) reviewDrafts(s);
+        } catch (err) { toast('Erro: ' + err.message); viewFunnel(); }
+      }
+    };
+    const af = $('#addForm');
+    af.addList.oninput = () => { $('#addHint').textContent = `${parseContacts(af.addList.value).length} contacto(s) reconhecido(s).`; };
+    af.onsubmit = async (e) => {
+      e.preventDefault();
+      const list = parseContacts(af.addList.value);
+      if (!list.length) return toast('Não encontrei e-mails');
+      const res = await api('/api/pipeline/contacts', { method: 'POST', body: { stream: s.id, contacts: list } });
+      toast(`${res.added.length} adicionado(s)${res.skipped.length ? ` · ${res.skipped.length} ignorado(s) (${[...new Set(res.skipped.map((x) => x.reason))].join(', ')})` : ''}`);
+      viewFunnel();
+    };
+    $('#streamForm').onsubmit = async (e) => {
+      e.preventDefault();
+      await api(`/api/pipeline/streams/${s.id}`, { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) });
+      toast('Frente guardada'); viewFunnel();
+    };
+    if (state.funnelOpen) { const id = state.funnelOpen; state.funnelOpen = null; openContact(id); }
+  }
+
+  // Revisão rápida dos rascunhos de uma frente, sem sair do funil.
+  function reviewDrafts(s) {
+    const ds = state.drafts.filter((d) => d.stream === s.id);
+    const out = $('#fOut'); if (!out) return;
+    if (!ds.length) { out.innerHTML = ''; return; }
+    out.innerHTML = `<div class="review">
+      <div class="c-head" style="margin:14px 0 8px"><b style="color:var(--ink)">${ds.length} rascunho(s) por rever</b><span><button class="btn" data-rv="all">Marcar todos como revistos</button> <button class="btn primary" data-rv="send">Enviar revistos</button></span></div>
+      ${ds.map((d) => `<div class="card rv" data-did="${esc(d.id)}">
+        <div class="c-head"><span>${d.kind === 'followup' ? 'Follow-up' : 'Pitch'} para <b style="color:var(--ink)">${esc(d.to)}</b>${d.attachments?.length ? ` · 📎 ${d.attachments.length}` : ''}</span>
+          <span><label class="checks" style="display:inline-flex;gap:5px"><input type="checkbox" data-rv="ok" ${d.reviewed ? 'checked' : ''}/> revisto</label> <button class="btn" data-rv="edit">Editar</button> <button class="btn danger" data-rv="del">Descartar</button></span></div>
+        <div class="c-title">${esc(d.subject)}</div>
+        ${d.note ? `<div class="muted" style="margin-bottom:6px;font-size:13px">${esc(d.note)}</div>` : ''}
+        <div class="c-body selectable">${esc(d.text)}</div>
+      </div>`).join('')}
+      <div id="rvLog" class="log" hidden></div>
+    </div>`;
+    out.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    out.onclick = async (e) => {
+      const b = e.target.closest('[data-rv]'); if (!b) return;
+      const card = b.closest('[data-did]'); const d = card && state.drafts.find((x) => x.id === card.dataset.did);
+      if (b.dataset.rv === 'ok') { await api(`/api/drafts/${d.id}`, { method: 'PUT', body: { reviewed: b.checked } }); d.reviewed = b.checked; return; }
+      if (b.dataset.rv === 'edit') return compose({ ...d, draftId: d.id });
+      if (b.dataset.rv === 'del') { await api(`/api/drafts/${d.id}`, { method: 'DELETE' }); await refreshDrafts(); return reviewDrafts(s); }
+      if (b.dataset.rv === 'all') { for (const x of ds) { await api(`/api/drafts/${x.id}`, { method: 'PUT', body: { reviewed: true } }); x.reviewed = true; } $$('[data-rv=ok]', out).forEach((c) => (c.checked = true)); return; }
+      if (b.dataset.rv === 'send') {
+        const ok = state.drafts.filter((x) => x.stream === s.id && x.reviewed);
+        if (!ok.length) return toast('Marca primeiro os rascunhos revistos');
+        if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = `Confirmar: enviar ${ok.length} agora`; return; }
+        b.disabled = true;
+        const log = $('#rvLog'); log.hidden = false;
+        for (const x of ok) {
+          try { await api('/api/send', { method: 'POST', body: { ...x, draftId: x.id } }); log.insertAdjacentHTML('beforeend', `<div>✓ ${esc(x.to)} — ${esc(x.subject)}</div>`); }
+          catch (err) { log.insertAdjacentHTML('beforeend', `<div>✗ ${esc(x.to)} — ${esc(err.message)}</div>`); }
+          await new Promise((res) => setTimeout(res, 1500));
+        }
+        await refreshDrafts();
+        toast('Envio concluído'); viewFunnel();
+      }
+    };
+  }
+
+  // Ficha do contacto (painel lateral): notas, estado, próxima ação e histórico.
+  function openContact(cid) {
+    const r = state.pipeline; const c = r?.contacts.find((x) => x.id === cid); if (!c) return;
+    $('.research')?.remove();
+    const p = document.createElement('aside');
+    p.className = 'research'; p.setAttribute('aria-label', 'Contacto');
+    const due = c.nextAction?.due ? new Date(c.nextAction.due).toISOString().slice(0, 10) : '';
+    p.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center"><span class="muted" style="font-size:13px">${esc(r.streams.find((x) => x.id === c.stream)?.name || '')}</span><button class="close" aria-label="Fechar">×</button></div>
+      <h2>${esc(c.name || c.email)}</h2>
+      <form id="cForm">
+        <div class="field"><label>Estado</label><select name="status">${Object.entries(r.statuses).map(([k, l]) => `<option value="${k}" ${k === c.status ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+        <div class="field"><label>Nome</label><input name="name" value="${esc(c.name)}" /></div>
+        <div class="field"><label>E-mail</label><input value="${esc(c.email)}" disabled /></div>
+        <div class="field"><label>Organização</label><input name="org" value="${esc(c.org)}" /></div>
+        <div class="field"><label>Notas (usadas pela IA)</label><textarea name="notes">${esc(c.notes)}</textarea></div>
+        <div class="field"><label>Próxima ação</label><input name="naText" value="${esc(c.nextAction?.text || '')}" placeholder="ex.: enviar protótipo jogável" /></div>
+        <div class="field"><label>Até</label><input name="naDue" type="date" value="${due}" /></div>
+        <div class="actions" style="margin:0"><button class="btn primary">Guardar</button><button type="button" class="btn" id="cMail">Escrever e-mail</button><span class="grow"></span><button type="button" class="btn danger" id="cDel">Remover</button></div>
+      </form>
+      <h3>Histórico</h3>
+      <ul class="hist">${[...(c.history || [])].reverse().map((h) => `<li><span class="muted">${dayFmt(h.at)}</span> ${esc(h.text)}</li>`).join('')}</ul>`;
+    app().append(p);
+    $('.close', p).onclick = () => p.remove();
+    $('.close', p).focus();
+    const f = $('#cForm', p);
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const v = Object.fromEntries(new FormData(f));
+      await api(`/api/pipeline/contacts/${c.id}`, { method: 'PUT', body: { status: v.status, name: v.name, org: v.org, notes: v.notes, nextAction: v.naText ? { text: v.naText, due: v.naDue || null } : null } });
+      toast('Contacto guardado'); p.remove(); viewFunnel();
+    };
+    $('#cMail', p).onclick = () => { const s = r.streams.find((x) => x.id === c.stream); p.remove(); compose({ account: s?.account, to: c.email }); };
+    $('#cDel', p).onclick = async (e) => {
+      const b = e.currentTarget;
+      if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = 'Confirmar remoção'; return; }
+      await api(`/api/pipeline/contacts/${c.id}`, { method: 'DELETE' }); toast('Contacto removido'); p.remove(); viewFunnel();
+    };
+  }
+
+  // A partir de um tópico: pôr a pessoa no funil.
+  async function addToFunnelMenu(btn, t) {
+    $('.ctx')?.remove();
+    const r = state.pipeline || (await api('/api/pipeline'));
+    const person = t.people[0] || {};
+    const m = document.createElement('div');
+    m.className = 'ctx'; m.setAttribute('role', 'menu');
+    m.innerHTML = `<div class="ctx-q">Adicionar ${esc(person.name || person.address)} a:</div>${r.streams.map((s) => `<button role="menuitem" data-s="${esc(s.id)}">${esc(s.name)}</button>`).join('')}`;
+    const rect = btn.getBoundingClientRect();
+    m.style.left = Math.min(rect.left, innerWidth - 260) + 'px'; m.style.top = rect.bottom + 6 + 'px';
+    app().append(m); $('button', m).focus();
+    m.onclick = async (e) => {
+      const sid = e.target.closest('[data-s]')?.dataset.s; if (!sid) return;
+      m.remove();
+      const res = await api('/api/pipeline/contacts', { method: 'POST', body: { stream: sid, contacts: [{ name: person.name, email: person.address, notes: `Do tópico: ${t.ai?.title || t.subject}`, source: 'do correio' }] } });
+      if (res.added.length) {
+        // Se a conversa já teve envio, o funil deteta-o na próxima verificação.
+        await api('/api/pipeline?sync=1');
+        toast(`Adicionado ao funil`); t.funnel = { stream: sid, label: 'no funil', streamName: r.streams.find((x) => x.id === sid).name };
+      } else toast(res.skipped[0]?.reason === 'já existe' ? 'Já está nesse funil' : 'Não consegui adicionar');
     };
   }
 
@@ -1196,6 +1491,7 @@ function mount(root, host, base) {
     if (state.mode === 'topics') loadTopics(); else { state.view = 'mail'; loadList(); $('#reader').innerHTML = `<div class="empty">Escolhe uma mensagem.<br /><span class="muted">j / k para navegar · r responder · s resumir · c nova · v mudar de vista</span></div>`; }
     highlightNav();
     emit('mail-ready', { accounts: state.status.accounts, mode: state.mode });
+    refreshFunnelCount(); setInterval(refreshFunnelCount, 5 * 60_000);
     checkUpdate();
   })();
 

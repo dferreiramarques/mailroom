@@ -159,7 +159,7 @@ export async function setFlag(acc, uid, folder, flag, on) {
   invalidate(`${ck(acc)}:list:`);
 }
 
-export async function sendMail(acc, { to, cc, bcc, subject, text, inReplyTo, references }) {
+export async function sendMail(acc, { to, cc, bcc, subject, text, inReplyTo, references, attachments }) {
   const transport = nodemailer.createTransport({
     host: acc.smtp.host,
     port: acc.smtp.port ?? 465,
@@ -168,7 +168,7 @@ export async function sendMail(acc, { to, cc, bcc, subject, text, inReplyTo, ref
   });
   const mail = {
     from: acc.fromName ? `"${acc.fromName}" <${acc.address}>` : acc.address,
-    to, cc, bcc, subject, text,
+    to, cc, bcc, subject, text, attachments,
     inReplyTo: inReplyTo || undefined,
     references: references?.length ? references : inReplyTo ? [inReplyTo] : undefined,
   };

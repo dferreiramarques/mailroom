@@ -13,6 +13,14 @@ Em cada cartão podes:
 - **Arrumar** (`e`): o tópico sai da vista e fica lido; volta sozinho se chegar uma mensagem nova nessa conversa. Os arrumados ficam numa lista própria, de onde se podem repor.
 - **Mudar de vista** (`v`, ou o seletor no topo): passas para a vista clássica com lista e leitor. As pastas, os rascunhos e os workflows continuam lá.
 
+**Funil de prospeção**: frentes contínuas (por omissão *Bitnik · publishers* e *monco · escolas e colégios*), cada uma com meta semanal de contactos novos, follow-up automático no prazo e fecho como "sem resposta" quando o follow-up também fica sem resposta.
+
+- Cada contacto tem estado (por contactar → contactado → follow-up → respondeu → em conversa → concluído/recusou/sem resposta), próxima ação com data e histórico.
+- *Preparar os pitches da semana* escreve um e-mail por contacto a partir do briefing da frente e das notas da pessoa; *Preparar follow-ups* responde no mesmo fio do pitch original. Tudo fica como rascunho para reveres e enviares.
+- O mailroom lê as caixas e deteta sozinho respostas (também de outra pessoa da mesma organização) e envios feitos fora da app.
+- **Precisa de ti** junta as respostas por tratar e as próximas ações do dia; os cartões dos tópicos mostram o estado no funil, e qualquer pessoa de um tópico pode entrar no funil com *＋ Funil*.
+- Anexos (por ex. o press kit) nos rascunhos e no compositor.
+
 **Pesquisa rápida**: seleciona uma palavra ou expressão num e-mail, carrega no botão direito e escolhe *Pesquisar e resumir com IA*. O mailroom procura em todas as caixas e resume o que sabe sobre isso: factos, pessoas e e-mails relacionados. Se o modelo acrescentar contexto geral, aparece separado do que vem dos teus e-mails.
 
 Também tem **triagem**, **pitch** (e-mails personalizados em lote), **publicação** (um briefing → versões para e-mail, newsletter, blog e redes) e um **agente** que pesquisa as caixas e prepara rascunhos.

@@ -61,3 +61,25 @@ export function demoSeen(accId, uid, on) {
   const m = msgs.find((x) => x.account === accId && x.uid === Number(uid) && x.folder === 'INBOX');
   if (m) m.seen = on;
 }
+
+// Na demonstração, um envio aparece nos Enviados (para o funil o poder ver).
+let demoUid = 5000;
+export function demoSend(accId, m) {
+  const acc = demoAccounts.find((a) => a.id === accId);
+  const id = `<sent-${++demoUid}@demo>`;
+  msgs.push({
+    account: accId, folder: 'Sent', uid: demoUid, messageId: id, inReplyTo: m.inReplyTo || null, references: m.references || [],
+    from: [{ name: 'David', address: acc?.address }], to: String(m.to).split(',').map((a) => ({ name: '', address: a.trim() })),
+    date: new Date().toISOString(), seen: true, subject: m.subject, text: m.text || '',
+  });
+  return { messageId: id };
+}
+// Só para testes: simula uma mensagem recebida.
+export function demoReceive(accId, { from, subject, text, inReplyTo }) {
+  const acc = demoAccounts.find((a) => a.id === accId);
+  msgs.push({
+    account: accId, folder: 'INBOX', uid: ++demoUid, messageId: `<in-${demoUid}@demo>`, inReplyTo: inReplyTo || null, references: inReplyTo ? [inReplyTo] : [],
+    from: [{ name: from.split('@')[0], address: from }], to: [{ name: 'David', address: acc?.address }],
+    date: new Date().toISOString(), seen: false, subject, text,
+  });
+}
