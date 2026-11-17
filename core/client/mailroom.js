@@ -1126,7 +1126,11 @@ function mount(root, host, base) {
       }
     };
     const af = $('#addForm');
-    af.addList.oninput = () => { $('#addHint').textContent = `${parseContacts(af.addList.value).length} contacto(s) reconhecido(s).`; };
+    af.addList.oninput = () => {
+      const v = af.addList.value, n = parseContacts(v).length;
+      const emails = (v.match(/[^\s,;<>"]+@[^\s,;<>"]+\.[a-z]{2,}/gi) || []).length;
+      $('#addHint').textContent = `${n} contacto(s) reconhecido(s).` + (emails > n ? ` Há ${emails} e-mails no texto: algumas linhas parecem coladas umas às outras — põe um contacto por linha (copia do texto simples, não da pré-visualização).` : '');
+    };
     af.onsubmit = async (e) => {
       e.preventDefault();
       const list = parseContacts(af.addList.value);
