@@ -986,7 +986,10 @@ function mount(root, host, base) {
       st('', spin('A testar a ligação…'));
       try {
         const r2 = await api('/api/accounts', { method: 'POST', body: { ...Object.fromEntries(new FormData(f)), saveAnyway } });
-        if (!r2.saved) { st('err', `${r2.test.error.split(' · ').map(esc).join('<br>')}<br><a href="#" id="saveAnyway">Guardar mesmo assim</a>`); $('#saveAnyway').onclick = (e) => { e.preventDefault(); submit(true); }; return; }
+        if (!r2.saved) {
+          const sug = r2.test.suggestHost;
+          st('err', `${r2.test.error.split(' · ').map(esc).join('<br>')}${sug ? `<br><span style="color:var(--ink)">O certificado deste servidor é de <b>${esc(sug)}</b>.</span> <button type="button" class="btn" id="useHost">Usar ${esc(sug)}</button>` : ''}<br><a href="#" id="saveAnyway">Guardar mesmo assim</a>`);
+          $('#useHost')?.addEventListener('click', () => { f.imapHost.value = sug; f.smtpHost.value = sug; submit(false); }); $('#saveAnyway').onclick = (e) => { e.preventDefault(); submit(true); }; return; }
         toast(r2.test.ok ? 'Conta ligada' : 'Conta guardada (sem ligação)');
         await accountsChanged();
       } catch (e) { st('err', esc(e.message)); }

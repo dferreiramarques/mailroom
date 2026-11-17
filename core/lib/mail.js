@@ -3,6 +3,7 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import nodemailer from 'nodemailer';
+import tls from 'node:tls';
 
 const cache = new Map(); // key -> { at, value }
 const TTL = 60_000;
@@ -241,6 +242,22 @@ export function explainError(e, kind, host, port) {
   return `${kind}: ${text || code || 'erro desconhecido'}`;
 }
 
+// Lê o certificado que o servidor apresenta (sem confiar nele) e devolve os nomes para que é válido.
+export function certNames(host, port) {
+  return new Promise((resolve) => {
+    const sock = tls.connect({ host, port, servername: host, rejectUnauthorized: false, timeout: 10000 }, () => {
+      const c = sock.getPeerCertificate() || {};
+      sock.end();
+      const alt = String(c.subjectaltname || '').split(',').map((x) => x.trim().replace(/^DNS:/, '')).filter(Boolean);
+      const names = [...new Set([c.subject?.CN, ...alt].filter(Boolean))];
+      // Prefere um nome concreto (sem *) e que não seja o próprio domínio já testado.
+      resolve(names.filter((n) => !n.startsWith('*.') && n !== host));
+    });
+    sock.on('error', () => resolve([]));
+    sock.on('timeout', () => { sock.destroy(); resolve([]); });
+  });
+}
+
 export async function testAccount(acc) {
   const errors = [];
   try {
@@ -255,5 +272,11 @@ export async function testAccount(acc) {
     await t.verify();
     t.close();
   } catch (e) { errors.push(explainError(e, 'Enviar (SMTP)', acc.smtp.host, acc.smtp.port ?? 465)); }
-  return errors.length ? { ok: false, error: errors.join(' · ') } : { ok: true };
+  if (!errors.length) return { ok: true };
+  const out = { ok: false, error: errors.join(' · ') };
+  if (errors.some((x) => /certificado/.test(x))) {
+    const names = await certNames(acc.imap.host, acc.imap.port ?? 993);
+    if (names.length) out.suggestHost = names[0];
+  }
+  return out;
 }
