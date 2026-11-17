@@ -2,6 +2,7 @@
 // pitches da semana, follow-ups no prazo, deteção de respostas e fecho automático.
 // Nada é enviado daqui: tudo vira rascunho para o utilizador rever.
 import crypto from 'node:crypto';
+import { COUNTRIES, LANGUAGES, guessCountry, normalizeCountry, resolveLanguage, promptLanguage } from './locale.js';
 
 export const STATUSES = {
   novo: 'Por contactar',
@@ -74,7 +75,7 @@ export function createPipeline({ store, io, accById, accs, ai, getSettings, addD
   const set = async (k, v) => (store.getData ? store.setData(k, v) : store.setSettings({ ...(await store.getSettings()), [`_${k}`]: v }));
   let chain = Promise.resolve();
   const tx = (fn) => (chain = chain.then(async () => {
-    const st = { streams: upgradeStreams(await get('streams', null)), contacts: await get('contacts', []) };
+    const st = { streams: upgradeStreams(await get('streams', null)), contacts: withCountry(await get('contacts', [])) };
     if (!st.streams?.length) st.streams = defaultStreams(accs());
     const out = await fn(st);
     await set('streams', st.streams); await set('contacts', st.contacts);
@@ -83,8 +84,13 @@ export function createPipeline({ store, io, accById, accs, ai, getSettings, addD
   const read = async () => {
     let streams = upgradeStreams(await get('streams', null));
     if (!streams?.length) streams = defaultStreams(accs());
-    return { streams, contacts: await get('contacts', []) };
+    return { streams, contacts: withCountry(await get('contacts', [])) };
   };
+  // Contactos antigos não tinham país: deduz-se das notas ou do domínio do e-mail.
+  function withCountry(list) {
+    for (const c of list || []) if (c.country === undefined) c.country = guessCountry(c);
+    return list;
+  }
   const note = (c, type, text, extra = {}) => { (c.history ||= []).push({ at: iso(), type, text, ...extra }); c.updatedAt = iso(); };
 
   // ---------- contactos ----------
@@ -95,6 +101,7 @@ export function createPipeline({ store, io, accById, accs, ai, getSettings, addD
       id: crypto.randomUUID(), stream, email,
       name: String(raw.name || '').trim(), org: String(raw.org || '').trim(), role: String(raw.role || '').trim(),
       notes: String(raw.notes || '').trim(), lang: raw.lang || '', status: 'novo',
+      country: guessCountry(raw),
       createdAt: iso(), updatedAt: iso(), history: [{ at: iso(), type: 'criado', text: raw.source ? `Adicionado (${raw.source})` : 'Adicionado' }],
     };
   }
@@ -188,7 +195,9 @@ export function createPipeline({ store, io, accById, accs, ai, getSettings, addD
     await sync().catch(() => {});
     const { streams, contacts } = await read();
     const drafts = await store.getDrafts();
-    return { streams, contacts, statuses: STATUSES, week: summarize(streams, contacts, drafts) };
+    const byId = Object.fromEntries(streams.map((x) => [x.id, x]));
+    for (const c of contacts) c.langResolved = resolveLanguage(c, byId[c.stream]);
+    return { streams, contacts, statuses: STATUSES, week: summarize(streams, contacts, drafts), countries: Object.fromEntries(Object.entries(COUNTRIES).map(([k, v]) => [k, v.name])), languages: LANGUAGES };
   }
 
   // ---------- preparar pitches e follow-ups ----------
@@ -205,7 +214,7 @@ export function createPipeline({ store, io, accById, accs, ai, getSettings, addD
     if (!pick.length) return [];
     const acc = accById(s.account);
     const brief = `${s.brief}\n\nPúblico: ${s.audience || '—'}\nMateriais a incluir quando fizer sentido: ${s.materials || '—'}`;
-    const out = await ai.pitch(await getSettings(), { brief, language: s.language || 'auto', account: acc, contacts: pick.map((c) => ({ name: c.name, email: c.email, org: c.org, role: c.role, notes: c.notes, lang: c.lang })) });
+    const out = await ai.pitch(await getSettings(), { brief, language: s.language || 'auto', account: acc, contacts: pick.map((c) => ({ name: c.name, email: c.email, org: c.org, role: c.role, notes: c.notes, country: COUNTRIES[c.country]?.name || '', lingua: promptLanguage(resolveLanguage(c, s)) })) });
     const created = [];
     for (const c of pick) {
       const p = out.find((x) => String(x.to || '').toLowerCase() === c.email) || out[pick.indexOf(c)];
@@ -229,7 +238,7 @@ export function createPipeline({ store, io, accById, accs, ai, getSettings, addD
     const acc = accById(s.account);
     const out = await ai.followups(await getSettings(), {
       account: acc, language: s.language || 'auto', materials: s.materials,
-      items: due.map((c) => ({ email: c.email, name: c.name, org: c.org, notes: c.notes, sentAt: c.firstContactAt, originalSubject: c.pitch?.subject || '', originalText: (c.pitch?.text || '').slice(0, 1500) })),
+      items: due.map((c) => ({ email: c.email, name: c.name, org: c.org, notes: c.notes, lingua: promptLanguage(resolveLanguage(c, s)), sentAt: c.firstContactAt, originalSubject: c.pitch?.subject || '', originalText: (c.pitch?.text || '').slice(0, 1500) })),
     });
     const created = [];
     for (const c of due) {
@@ -292,6 +301,7 @@ export function createPipeline({ store, io, accById, accs, ai, getSettings, addD
       const c = st.contacts.find((x) => x.id === id);
       if (!c) throw Object.assign(new Error('Contacto não encontrado'), { status: 404 });
       for (const k of ['name', 'org', 'role', 'notes', 'lang']) if (k in patch) c[k] = String(patch[k] ?? '');
+      if ('country' in patch) c.country = normalizeCountry(patch.country);
       if (patch.status && STATUSES[patch.status] && patch.status !== c.status) {
         note(c, 'estado', `${STATUSES[c.status]} → ${STATUSES[patch.status]}`);
         c.status = patch.status;

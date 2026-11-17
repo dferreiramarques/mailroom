@@ -291,9 +291,10 @@ a.btn { text-decoration: none; color: inherit; display: inline-block; }
 .week .actions .grow { flex: 1; }
 .chip.on { border-style: solid; color: var(--ink); background: var(--panel); font-weight: 600; }
 .ctable { display: flex; flex-direction: column; background: var(--panel); border-radius: 10px; box-shadow: var(--shadow-1); overflow: hidden; margin-bottom: 16px; }
-.crow { display: grid; grid-template-columns: minmax(0, 1.4fr) auto minmax(0, 1fr); gap: 14px; align-items: center; text-align: left; border: 0; border-top: 1px solid var(--soft); background: none; padding: 11px 16px; }
+.crow { display: grid; grid-template-columns: minmax(0, 1.4fr) auto auto minmax(0, 1fr); gap: 14px; align-items: center; text-align: left; border: 0; border-top: 1px solid var(--soft); background: none; padding: 11px 16px; }
 .crow:first-child { border-top: 0; }
 .crow:hover { background: var(--soft); }
+.cloc { font-size: 12px; font-variant-numeric: tabular-nums; letter-spacing: .02em; white-space: nowrap; }
 .cname { display: flex; flex-direction: column; min-width: 0; }
 .cname b { font-weight: 600; }
 .cname .muted, .cnext { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -310,4 +311,4 @@ details.card[open] summary::before { content: '▾ '; }
 .hist { padding-left: 0; list-style: none; }
 .hist li { padding: 5px 0; border-top: 1px solid var(--soft); font-size: 13px; }
 .rv .c-body { max-height: 220px; overflow: auto; }
-@container (max-width: 720px) { .crow { grid-template-columns: 1fr auto; } .cnext { grid-column: 1 / -1; } }
+@container (max-width: 720px) { .crow { grid-template-columns: 1fr auto auto; } .cnext { grid-column: 1 / -1; } }

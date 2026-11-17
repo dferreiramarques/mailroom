@@ -1032,6 +1032,7 @@ function mount(root, host, base) {
       ${shown.length ? `<div class="ctable">${shown.map((c) => `
         <button class="crow" data-fx="contact" data-cid="${esc(c.id)}">
           <span class="cname"><b>${esc(c.name || c.email)}</b><span class="muted">${esc([c.org, c.email].filter(Boolean).join(' · '))}</span></span>
+          <span class="muted cloc" title="${esc([r.countries?.[c.country] || 'País desconhecido', 'escreve em ' + (r.languages?.[c.langResolved] || c.langResolved)].join(' · '))}">${esc(c.country || '—')} · ${esc(String(c.langResolved || '').split('-')[0].toUpperCase())}</span>
           <span class="pill st-${esc(c.status)}">${esc(r.statuses[c.status])}</span>
           <span class="cnext muted">${c.nextAction && !CLOSED.has(c.status) ? `${esc(c.nextAction.text)} · ${dueLabel(c.nextAction.due)}` : c.firstContactAt ? `contactado ${dayFmt(c.firstContactAt)}` : ''}${drafts.some((d) => d.contactId === c.id) ? ' · <span class="tag">rascunho</span>' : ''}</span>
         </button>`).join('')}</div>` : `<p class="muted">${cs.length ? 'Nenhum contacto neste filtro.' : 'Ainda não há contactos nesta frente. Adiciona os primeiros em baixo.'}</p>`}
@@ -1041,7 +1042,7 @@ function mount(root, host, base) {
         <form id="addForm" style="margin-top:12px">
           <div class="field"><label for="addList">Um por linha: nome, e-mail; organização; notas</label>
           <textarea id="addList" required placeholder="Ana Lopes, ana@editora.pt; Editora Exemplo; publica party games e quer versões digitais&#10;Direção, direcao@colegio.pt; Colégio Exemplo; tem clube de robótica"></textarea></div>
-          <div class="hint" id="addHint">As notas ajudam a IA a escolher o ângulo de cada pitch.</div>
+          <div class="hint" id="addHint">As notas ajudam a IA a escolher o ângulo de cada pitch. O país vem das notas (ex.: «ES», «Alemanha») ou do domínio do e-mail; podes corrigi-lo em cada contacto.</div>
           <div class="actions" style="margin:0"><button class="btn primary">Adicionar a ${esc(s.name)}</button></div>
         </form>
       </details>
@@ -1058,7 +1059,7 @@ function mount(root, host, base) {
           <p class="hint">Preenche os [marcadores]. A IA não inventa factos: o que não estiver aqui ou nas notas do contacto não entra no e-mail.</p>
           <div class="field"><label for="sfMat">Materiais (links a usar nos e-mails)</label><input id="sfMat" name="materials" value="${esc(s.materials || '')}" /></div>
           <div class="row">
-            <div class="field"><label for="sfLang">Língua</label><select id="sfLang" name="language">${[['auto', 'Automática por contacto'], ['pt-PT', 'Português'], ['en', 'Inglês']].map(([v, l]) => `<option value="${v}" ${v === s.language ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+            <div class="field"><label for="sfLang">Língua</label><select id="sfLang" name="language">${[['auto', 'A do país de cada contacto'], ...Object.entries(r.languages || { 'pt-PT': 'Português', en: 'Inglês' })].map(([v, l]) => `<option value="${v}" ${v === s.language ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
             <div class="field"><label for="sfT">Contactos novos por semana</label><input id="sfT" name="weeklyTarget" type="number" min="0" max="100" value="${s.weeklyTarget}" /></div>
             <div class="field"><label for="sfF">Follow-up ao fim de (dias)</label><input id="sfF" name="followUpDays" type="number" min="1" max="60" value="${s.followUpDays}" /></div>
             <div class="field"><label for="sfC">Fechar sem resposta (dias após o follow-up)</label><input id="sfC" name="closeAfterDays" type="number" min="1" max="90" value="${s.closeAfterDays}" /></div>
@@ -1164,6 +1165,10 @@ function mount(root, host, base) {
         <div class="field"><label>Nome</label><input name="name" value="${esc(c.name)}" /></div>
         <div class="field"><label>E-mail</label><input value="${esc(c.email)}" disabled /></div>
         <div class="field"><label>Organização</label><input name="org" value="${esc(c.org)}" /></div>
+        <div class="row">
+          <div class="field"><label>País</label><select name="country"><option value="">Desconhecido</option>${Object.entries(r.countries || {}).sort((a, b) => a[1].localeCompare(b[1], 'pt')).map(([k, l]) => `<option value="${k}" ${k === c.country ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+          <div class="field"><label>Língua do e-mail</label><select name="lang"><option value="">Auto · ${esc(r.languages?.[c.langResolved] || c.langResolved || '')}</option>${Object.entries(r.languages || {}).map(([k, l]) => `<option value="${k}" ${k === c.lang ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+        </div>
         <div class="field"><label>Notas (usadas pela IA)</label><textarea name="notes">${esc(c.notes)}</textarea></div>
         <div class="field"><label>Próxima ação</label><input name="naText" value="${esc(c.nextAction?.text || '')}" placeholder="ex.: enviar protótipo jogável" /></div>
         <div class="field"><label>Até</label><input name="naDue" type="date" value="${due}" /></div>
@@ -1178,7 +1183,7 @@ function mount(root, host, base) {
     f.onsubmit = async (e) => {
       e.preventDefault();
       const v = Object.fromEntries(new FormData(f));
-      await api(`/api/pipeline/contacts/${c.id}`, { method: 'PUT', body: { status: v.status, name: v.name, org: v.org, notes: v.notes, nextAction: v.naText ? { text: v.naText, due: v.naDue || null } : null } });
+      await api(`/api/pipeline/contacts/${c.id}`, { method: 'PUT', body: { status: v.status, name: v.name, org: v.org, notes: v.notes, country: v.country, lang: v.lang, nextAction: v.naText ? { text: v.naText, due: v.naDue || null } : null } });
       toast('Contacto guardado'); p.remove(); viewFunnel();
     };
     $('#cMail', p).onclick = () => { const s = r.streams.find((x) => x.id === c.stream); p.remove(); compose({ account: s?.account, to: c.email }); };
