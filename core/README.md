@@ -60,7 +60,7 @@ As caches (correio e resumos) são separadas por instância e por endereço de c
 | atributo | o quê |
 |---|---|
 | `api` | caminho onde o router está montado (por omissão `/mail`) |
-| `brand` | título no topo (por omissão "mailroom") |
+| `brand` | título no topo da barra lateral (sem este atributo, não aparece título) |
 | `account` | conta selecionada ao abrir |
 | `mode` | `topics` (por omissão) ou `classic`. Sem este atributo, o componente lembra a última escolha do utilizador |
 | `theme` | `light` ou `dark`. Sem este atributo, segue o sistema |

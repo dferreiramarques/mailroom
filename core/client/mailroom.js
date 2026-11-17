@@ -80,6 +80,22 @@ function mount(root, host, base) {
   const applyTheme = (t) => { if (hostTheme) return; if (t === 'auto') host.removeAttribute('theme'); else host.setAttribute('theme', t); };
   applyTheme(ls.get('mailroom.theme') || 'light');
 
+  // Tipo de letra: as 5 famílias mais usadas no Google Fonts, carregadas só quando escolhidas.
+  const FONTS = { system: { label: 'Do sistema' }, Roboto: {}, 'Open Sans': {}, Montserrat: {}, Lato: {}, Poppins: {} };
+  const applyFont = (name) => {
+    if (!FONTS[name] || name === 'system') { host.style.removeProperty('--font'); return; }
+    const id = 'mailroom-font-' + name.replace(/\s/g, '-');
+    // @font-face não funciona dentro do Shadow DOM: a folha vai para o <head> da página.
+    if (!document.getElementById(id)) {
+      const l = document.createElement('link');
+      l.id = id; l.rel = 'stylesheet';
+      l.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(name)}:wght@400;500;600;700&display=swap`;
+      document.head.append(l);
+    }
+    host.style.setProperty('--font', `"${name}", ui-sans-serif, system-ui, sans-serif`);
+  };
+  applyFont(ls.get('mailroom.font') || 'system');
+
   const state = {
     status: null, account: host.getAttribute('account') || 'all', folder: 'INBOX', view: 'topics',
     mode: host.getAttribute('mode') || ls.get('mailroom.mode') || 'topics',
@@ -907,7 +923,11 @@ function mount(root, host, base) {
       </form>`}
 
       ${hostTheme ? '' : `<h2>Aparência</h2>
-      <div class="field" style="max-width:260px"><label for="pTheme">Tema</label><select id="pTheme"><option value="light">Claro</option><option value="dark">Escuro</option><option value="auto">Igual ao sistema</option></select></div>`}
+      <div class="row" style="max-width:560px">
+        <div class="field"><label for="pTheme">Tema</label><select id="pTheme"><option value="light">Claro</option><option value="dark">Escuro</option><option value="auto">Igual ao sistema</option></select></div>
+        <div class="field"><label for="pFont">Tipo de letra</label><select id="pFont">${Object.entries(FONTS).map(([k, v]) => `<option value="${esc(k)}">${esc(v.label || k)}</option>`).join('')}</select></div>
+      </div>
+      <p class="hint">As fontes do Google Fonts são descarregadas da Google na primeira vez que as escolhes.</p>`}
 
       <h2>Comportamento</h2>
       <label class="toggle"><input type="checkbox" id="pTopics" ${s.prefs.autoTopics ? 'checked' : ''}/> Resumir tópicos automaticamente ao abrir</label>
@@ -936,6 +956,8 @@ function mount(root, host, base) {
     $('#pTopics').onchange = savePrefs; $('#pSuggest').onchange = savePrefs;
     const th = $('#pTheme');
     if (th) { th.value = ls.get('mailroom.theme') || 'light'; th.onchange = () => { ls.set('mailroom.theme', th.value); applyTheme(th.value); }; }
+    const fo = $('#pFont');
+    if (fo) { fo.value = ls.get('mailroom.font') || 'system'; fo.onchange = () => { ls.set('mailroom.font', fo.value); applyFont(fo.value); }; }
 
     const f = $('#aiForm'); if (!f) return;
     const syncPreset = (apply) => {
@@ -1167,11 +1189,11 @@ class MailRoom extends HTMLElement {
     const base = (this.getAttribute('api') || '/mail').replace(/\/$/, '');
     const root = this.attachShadow({ mode: 'open' });
     root.innerHTML = `<link rel="stylesheet" href="${base}/client.css">${SHELL}`;
-    root.querySelector('.brand').textContent = this.getAttribute('brand') || 'mailroom';
+    root.querySelector('.brand').textContent = this.getAttribute('brand') || '';
     if (!this.hasAttribute('tabindex')) this.tabIndex = 0;
     this._api = mount(root, this, base);
   }
-  attributeChangedCallback(name, _, v) { if (name === 'brand' && this.shadowRoot) this.shadowRoot.querySelector('.brand').textContent = v || 'mailroom'; }
+  attributeChangedCallback(name, _, v) { if (name === 'brand' && this.shadowRoot) this.shadowRoot.querySelector('.brand').textContent = v || ''; }
   /** Abre o compositor preenchido: el.compose({ account, to, subject, text }) */
   compose(d) { this._api?.compose(d); }
   refresh() { this._api?.refresh(); }
