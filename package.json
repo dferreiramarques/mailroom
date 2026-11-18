@@ -1,6 +1,6 @@
 {
   "name": "mailroom",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "description": "mailroom — correio por tópicos com assistente de IA",
   "main": "electron/main.js",
   "scripts": {

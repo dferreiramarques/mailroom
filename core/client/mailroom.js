@@ -706,7 +706,7 @@ function mount(root, host, base) {
     const defAcc = d.account || (state.account !== 'all' ? state.account : accounts[0]?.id);
     $('#reader').innerHTML = `<form class="pane" id="composeForm">
       ${backBtn()}
-      <h1>${d.draftId ? 'Rascunho' : d.inReplyTo ? 'Resposta' : 'Nova mensagem'}</h1>
+      <div class="compose-head"><h1>${d.draftId ? 'Rascunho' : d.inReplyTo ? 'Resposta' : 'Nova mensagem'}</h1><button type="button" class="close" id="cClose" aria-label="Fechar (Esc)" title="Fechar (Esc) — o que escreveste fica nos rascunhos">×</button></div>
       ${d.note ? `<div class="ai"><div class="ai-label">Nota do assistente</div>${esc(d.note)}</div>` : ''}
       <div class="row">
         <div class="field" style="max-width:220px"><label for="cFrom">De</label><select id="cFrom" name="account">${accounts.map((a) => `<option value="${esc(a.id)}" ${a.id === defAcc ? 'selected' : ''}>${esc(a.address)}</option>`).join('')}</select></div>
@@ -780,6 +780,18 @@ function mount(root, host, base) {
     };
     if (d.draftId) $('#delDraft').onclick = async () => { await api(`/api/drafts/${d.draftId}`, { method: 'DELETE' }); await refreshDrafts(); renderDraftList(); renderDraftsHome(); toast('Rascunho apagado'); };
     $('#backTopics')?.addEventListener('click', () => { $('#reader').innerHTML = ''; loadTopics(); });
+    // Fechar: o que já foi escrito não se perde, vai para os rascunhos.
+    const closeCompose = async () => {
+      const v = val();
+      const changed = ['to', 'cc', 'bcc', 'subject', 'text'].some((k) => (v[k] || '') !== (d[k] || '')) || atts.length !== (d.attachments || []).length;
+      if (changed && (v.to || v.subject || v.text || atts.length)) { try { await $('#saveDraft').onclick(); } catch (err) { toast('Não consegui guardar o rascunho: ' + err.message); return; } }
+      state.closeCompose = null;
+      if (state.view === 'drafts') { renderDraftList(); renderDraftsHome(); }
+      else if (state.mode === 'topics') { $('#reader').innerHTML = ''; app().classList.remove('reading'); loadTopics(); }
+      else { app().classList.remove('reading'); readerHome(); focusList(); }
+    };
+    state.closeCompose = closeCompose;
+    $('#cClose').onclick = closeCompose;
     (d.to ? $('#cText') : $('#cTo')).focus();
     if (d.to && d.text && !d.draftId) $('#cText').setSelectionRange(0, 0);
   }
@@ -1534,8 +1546,9 @@ function mount(root, host, base) {
       if ($('.ctx')) return closeCtx();
       if ($('.research')) return $('.research').remove();
       if ($('.focus')) return closeFocus();
+      if ($('#composeForm') && state.closeCompose && !tgt.closest?.('input, textarea, select')) return state.closeCompose();
     }
-    if (tgt.closest?.('input, textarea, select')) { if (e.key === 'Escape') tgt.blur(); return; }
+    if (tgt.closest?.('input, textarea, select')) { if (e.key === 'Escape') { tgt.blur(); host.focus({ preventScroll: true }); } return; } // o foco fica na app, para o Esc seguinte e os atalhos funcionarem
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const k = e.key;
     if (k === '/') { e.preventDefault(); (state.mode === 'topics' ? $('#topicSearch') : $('#search'))?.focus(); return; }
