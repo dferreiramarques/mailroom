@@ -724,6 +724,7 @@ function mount(root, host, base) {
   $('#reader').addEventListener('click', (e) => {
     const b = e.target.closest('[data-act]'); if (!b) return;
     const act = b.dataset.act;
+    if (act === 'back' && $('#composeForm') && state.closeCompose) return state.closeCompose();
     if (act === 'back') { app().classList.remove('reading'); if (state.mode === 'classic') { readerHome(); focusList(); } return; }
     if (act === 'new') return compose();
     if (act === 'reply') reply();
@@ -784,11 +785,61 @@ function mount(root, host, base) {
   }
 
   // ---------- compor ----------
+  // Guarda o sítio de onde se abriu o editor (o funil a meio da revisão, uma mensagem, os tópicos…),
+  // tal como estava: os mesmos elementos, a mesma posição e o mesmo foco. Ao fechar, volta-se lá.
+  function rememberOrigin() {
+    const reader = $('#reader');
+    if ($('#composeForm', reader)) return; // abrir outro rascunho por cima mantém o sítio original
+    const scrolls = [[reader, reader.scrollTop], ...[...reader.querySelectorAll('*')].filter((el) => el.scrollTop > 0).map((el) => [el, el.scrollTop])];
+    const frag = document.createDocumentFragment();
+    while (reader.firstChild) frag.append(reader.firstChild);
+    state.composeReturn = { frag, scrolls, view: state.view, mode: state.mode, reading: app().classList.contains('reading'), focusId: $('.focus') ? state.focusId : null, active: root.activeElement };
+  }
+  // Fecha o editor e volta ao sítio de origem. what: { saved, sent, deleted, draftId }
+  async function leaveCompose(what = {}) {
+    state.closeCompose = null;
+    const ret = state.composeReturn; state.composeReturn = null;
+    const reader = $('#reader');
+    if (ret && ret.frag.childNodes.length && ret.mode === state.mode) {
+      reader.replaceChildren(ret.frag);
+      app().classList.toggle('reading', ret.reading);
+      state.view = ret.view; highlightNav();
+      for (const [el, top] of ret.scrolls) if (el.isConnected) el.scrollTop = top;
+      // O cartão desse rascunho (revisão do funil) mostra já o que mudou.
+      const card = what.draftId && reader.querySelector(`[data-did="${CSS.escape(what.draftId)}"]`);
+      if (card) {
+        const x = state.drafts.find((y) => y.id === what.draftId);
+        if (what.sent || what.deleted || !x) card.remove();
+        else {
+          $('.c-title', card).textContent = x.subject || '';
+          $('.c-body', card).textContent = x.text || '';
+          const to = $('.c-head b', card); if (to) to.textContent = x.to || '';
+          const ok = $('[data-rv=ok]', card); if (ok) ok.checked = Boolean(x.reviewed);
+          card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+        }
+      }
+      if (ret.view === 'drafts') { renderDraftList(); if (what.sent || what.deleted) renderDraftsHome(); }
+      if (ret.view === 'funnel') refreshFunnelCount();
+      if (ret.mode === 'topics' && what.sent) loadTopics(true);
+      if (ret.focusId && topicById(ret.focusId)) openFocus(ret.focusId);
+      else if (card?.isConnected) { card.tabIndex = -1; card.focus({ preventScroll: true }); }
+      else if (ret.active?.isConnected && ret.active !== host) ret.active.focus({ preventScroll: true });
+      else host.focus({ preventScroll: true });
+      return;
+    }
+    // Sem sítio guardado (ou mudou a vista entretanto): o início da caixa ou os tópicos.
+    if (state.view === 'drafts') { renderDraftList(); renderDraftsHome(); }
+    else if (state.mode === 'topics') { reader.innerHTML = ''; app().classList.remove('reading'); loadTopics(what.sent); }
+    else { app().classList.remove('reading'); readerHome(); focusList(); }
+  }
+
   function compose(d = {}) {
+    rememberOrigin();
     closeFocus();
     app().classList.add('reading');
     const accounts = state.status.accounts;
     const defAcc = d.account || (state.account !== 'all' ? state.account : accounts[0]?.id);
+    $('#reader').scrollTop = 0;
     $('#reader').innerHTML = `<form class="pane" id="composeForm">
       ${backBtn()}
       <div class="compose-head"><h1>${d.draftId ? 'Rascunho' : d.inReplyTo ? 'Resposta' : 'Nova mensagem'}</h1><button type="button" class="close" id="cClose" aria-label="Fechar (Esc)" title="Fechar (Esc) — o que escreveste fica nos rascunhos">×</button></div>
@@ -850,30 +901,31 @@ function mount(root, host, base) {
         emit('mail-sent', { account: v.account, to: v.to, subject: v.subject });
         toast('Enviado');
         await refreshDrafts();
-        if (state.view === 'drafts') { renderDraftList(); renderDraftsHome(); }
-        else if (state.mode === 'topics') loadTopics(true);
-        else $('#reader').innerHTML = `<div class="empty">Enviado.</div>`;
+        await leaveCompose({ sent: true, draftId: d.draftId });
       } catch (err) { btn.disabled = false; btn.textContent = 'Enviar'; toast('Erro: ' + err.message); }
     };
-    $('#saveDraft').onclick = async () => {
+    const saveDraft = async () => {
       const v = val();
       const body = { account: v.account, to: v.to, cc: v.cc, bcc: v.bcc, subject: v.subject, text: v.text, reviewed: v.reviewed, inReplyTo: v.inReplyTo, references: v.references, attachments: atts };
       if (d.draftId) await api(`/api/drafts/${d.draftId}`, { method: 'PUT', body });
       else { const nd = await api('/api/drafts', { method: 'POST', body }); d.draftId = nd.id; }
-      await refreshDrafts(); if (state.view === 'drafts') renderDraftList();
+      await refreshDrafts();
       toast('Rascunho guardado');
     };
-    if (d.draftId) $('#delDraft').onclick = async () => { await api(`/api/drafts/${d.draftId}`, { method: 'DELETE' }); await refreshDrafts(); renderDraftList(); renderDraftsHome(); toast('Rascunho apagado'); };
-    $('#backTopics')?.addEventListener('click', () => { $('#reader').innerHTML = ''; loadTopics(); });
+    // Guardar o rascunho fecha o editor e volta ao sítio de onde se veio (ex.: a revisão no funil).
+    $('#saveDraft').onclick = async () => {
+      try { await saveDraft(); } catch (err) { toast('Erro: ' + err.message); return; }
+      await leaveCompose({ saved: true, draftId: d.draftId });
+    };
+    if (d.draftId) $('#delDraft').onclick = async () => { await api(`/api/drafts/${d.draftId}`, { method: 'DELETE' }); await refreshDrafts(); toast('Rascunho apagado'); await leaveCompose({ deleted: true, draftId: d.draftId }); };
+    $('#backTopics')?.addEventListener('click', () => leaveCompose());
     // Fechar: o que já foi escrito não se perde, vai para os rascunhos.
     const closeCompose = async () => {
       const v = val();
       const changed = ['to', 'cc', 'bcc', 'subject', 'text'].some((k) => (v[k] || '') !== (d[k] || '')) || atts.length !== (d.attachments || []).length;
-      if (changed && (v.to || v.subject || v.text || atts.length)) { try { await $('#saveDraft').onclick(); } catch (err) { toast('Não consegui guardar o rascunho: ' + err.message); return; } }
-      state.closeCompose = null;
-      if (state.view === 'drafts') { renderDraftList(); renderDraftsHome(); }
-      else if (state.mode === 'topics') { $('#reader').innerHTML = ''; app().classList.remove('reading'); loadTopics(); }
-      else { app().classList.remove('reading'); readerHome(); focusList(); }
+      const saved = changed && (v.to || v.subject || v.text || atts.length);
+      if (saved) { try { await saveDraft(); } catch (err) { toast('Não consegui guardar o rascunho: ' + err.message); return; } }
+      await leaveCompose({ saved, draftId: d.draftId });
     };
     state.closeCompose = closeCompose;
     $('#cClose').onclick = closeCompose;

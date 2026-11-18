@@ -486,3 +486,8 @@ details.card[open] summary::before { content: '▾ '; }
 @media (prefers-reduced-motion: reduce) { .app { transition: none; } }
 .app[data-rail=bar] .rail-toggle, .app[data-rail=bar] .group-label, .app[data-rail=bar] .brand, .app[data-rail=bar] .mode { display: none; }
 .app[data-rail=bar] .rail-top { display: none; }
+
+/* cartão que acabou de ser editado: um realce breve ao voltar */
+.card.flash { animation: flash 1.4s ease-out; }
+@keyframes flash { from { box-shadow: 0 0 0 2px var(--focus), var(--shadow-1); } to { box-shadow: 0 0 0 2px transparent, var(--shadow-1); } }
+@media (prefers-reduced-motion: reduce) { .card.flash { animation: none; } }
