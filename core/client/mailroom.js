@@ -178,13 +178,38 @@ function mount(root, host, base) {
     $$('.switch button').forEach((b) => { b.classList.toggle('on', b.dataset.mode === state.mode); b.setAttribute('aria-selected', b.dataset.mode === state.mode); });
     $('#draftCount').textContent = state.drafts.length || '';
   }
+  // Painel de leitura vazio: números da caixa, botão de nova mensagem e atalhos.
+  const SHORTCUTS = [['j', 'k', 'Seguinte / anterior'], ['r', 'Responder'], ['s', 'Resumir com IA'], ['g', 'Sugerir respostas'], ['c', 'Nova mensagem'], ['/', 'Pesquisar'], ['v', 'Mudar de vista'], ['Esc', 'Fechar / sair do campo']];
+  const kbd = (k) => `<kbd class="key">${esc(k)}</kbd>`;
+  async function readerHome() {
+    const reader = $('#reader');
+    const where = `${state.account === 'all' ? 'Todas as caixas' : acc(state.account).label} · ${state.folder === 'Sent' ? 'Enviados' : 'Entrada'}`;
+    const token = (readerHome.t = (readerHome.t || 0) + 1);
+    reader.innerHTML = `<div class="home">
+      <p class="home-where">${esc(where)}</p>
+      <div class="stats" aria-live="polite">${['Mensagens', 'Lidas', 'Por ler'].map((l) => `<div class="stat"><b>…</b><span>${l}</span></div>`).join('')}</div>
+      <button class="btn primary big" data-act="new">Nova mensagem ${kbd('c')}</button>
+      <ul class="keys">${SHORTCUTS.map((x) => `<li>${x.slice(0, -1).map(kbd).join(' ')}<span>${esc(x.at(-1))}</span></li>`).join('')}</ul>
+    </div>`;
+    try {
+      const st = await api(`/api/stats?${new URLSearchParams({ account: state.account, folder: state.folder })}`);
+      if (token !== readerHome.t || !$('.home', reader)) return;
+      const n = (v) => Number(v).toLocaleString('pt-PT');
+      $('.stats', reader).innerHTML = [[st.total, 'Mensagens'], [st.read, 'Lidas'], [st.unread, 'Por ler']]
+        .map(([v, l]) => `<div class="stat ${l === 'Por ler' && v ? 'hot' : ''}"><b>${n(v)}</b><span>${l}</span></div>`).join('')
+        + (st.partial ? '<p class="hint">Algumas caixas não responderam; os números estão incompletos.</p>' : '');
+    } catch { if (token === readerHome.t) $('.stats', reader)?.remove(); }
+  }
+  // Põe o foco do teclado na lista, para j/k funcionarem logo depois de escolher a caixa.
+  function focusList() { const ul = $('#messageList'); ul.tabIndex = -1; ul.focus({ preventScroll: true }); }
+
   function setMode(mode) {
     state.mode = mode;
     ls.set('mailroom.mode', mode);
     app().dataset.mode = mode;
     closeFocus();
     if (mode === 'topics') { state.view = 'topics'; app().classList.remove('reading'); loadTopics(); }
-    else { state.view = 'mail'; loadList(); $('#reader').innerHTML = `<div class="empty">Escolhe uma mensagem.<br /><span class="muted">j / k para navegar · r responder · s resumir · c nova</span></div>`; }
+    else { state.view = 'mail'; loadList(); readerHome(); }
     highlightNav();
     emit('mode-change', { mode });
   }
@@ -198,11 +223,11 @@ function mount(root, host, base) {
       state.account = b.dataset.account;
       if (state.mode === 'topics') { closeFocus(); state.view = 'topics'; loadTopics(); }
       else if (state.view === 'drafts') renderDraftList();
-      else { state.view = 'mail'; loadList(); }
+      else { state.view = 'mail'; app().classList.remove('reading'); readerHome(); loadList().then(focusList); }
     }
     if (b.dataset.folder) {
       if (state.mode !== 'classic') { state.mode = 'classic'; ls.set('mailroom.mode', 'classic'); app().dataset.mode = 'classic'; }
-      state.folder = b.dataset.folder; state.view = 'mail'; loadList();
+      state.folder = b.dataset.folder; state.view = 'mail'; app().classList.remove('reading'); readerHome(); loadList().then(focusList);
     }
     if (b.dataset.view) openView(b.dataset.view);
     highlightNav();
@@ -609,7 +634,8 @@ function mount(root, host, base) {
   $('#reader').addEventListener('click', (e) => {
     const b = e.target.closest('[data-act]'); if (!b) return;
     const act = b.dataset.act;
-    if (act === 'back') return app().classList.remove('reading');
+    if (act === 'back') { app().classList.remove('reading'); if (state.mode === 'classic') { readerHome(); focusList(); } return; }
+    if (act === 'new') return compose();
     if (act === 'reply') reply();
     if (act === 'summary') summarize();
     if (act === 'suggest') suggest();
@@ -1507,18 +1533,16 @@ function mount(root, host, base) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const k = e.key;
     if (k === '/') { e.preventDefault(); (state.mode === 'topics' ? $('#topicSearch') : $('#search'))?.focus(); return; }
-    if (k === 'c') return compose();
-    if (k === 'v') return setMode(state.mode === 'topics' ? 'classic' : 'topics');
+    // preventDefault: sem ele, a tecla chega ao campo que acabou de receber o foco (o «c» aparecia no Para).
+    if (k === 'c') { e.preventDefault(); return compose(); }
+    if (k === 'v') { e.preventDefault(); return setMode(state.mode === 'topics' ? 'classic' : 'topics'); }
     if (k === 'e' && state.mode === 'topics' && !state.showDismissed) {
       const id = ($('.focus') ? state.focusId : null) || tgt.closest?.('.topic')?.dataset.id || [...state.open].at(-1);
       if (id) { closeFocus(); return dismissTopic(id); }
     }
     if (state.mode === 'classic') {
-      if (k === 'j') select(state.index + 1);
-      else if (k === 'k') select(Math.max(0, state.index - 1));
-      else if (k === 'r') reply();
-      else if (k === 's') summarize();
-      else if (k === 'g') suggest();
+      const run = { j: () => select(state.index + 1), k: () => select(Math.max(0, state.index - 1)), r: reply, s: summarize, g: suggest }[k];
+      if (run) { e.preventDefault(); run(); }
     }
   });
 
@@ -1539,7 +1563,7 @@ function mount(root, host, base) {
     catch (e) { $('#reader').innerHTML = `<div class="empty">Não consegui ligar ao mailroom em ${esc(base)}.<br><span class="muted">${esc(e.message)}</span></div>`; return; }
     renderNav();
     await refreshDrafts();
-    if (state.mode === 'topics') loadTopics(); else { state.view = 'mail'; loadList(); $('#reader').innerHTML = `<div class="empty">Escolhe uma mensagem.<br /><span class="muted">j / k para navegar · r responder · s resumir · c nova · v mudar de vista</span></div>`; }
+    if (state.mode === 'topics') loadTopics(); else { state.view = 'mail'; loadList(); readerHome(); }
     highlightNav();
     emit('mail-ready', { accounts: state.status.accounts, mode: state.mode });
     refreshFunnelCount(); setInterval(refreshFunnelCount, 5 * 60_000);

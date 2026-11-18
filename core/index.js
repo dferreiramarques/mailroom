@@ -76,6 +76,7 @@ export function createMailModule(opts = {}) {
 
   const fake = {
         list: async (acc, o) => demo.demoList(acc.id, o),
+        stats: async (acc, folder) => { const l = demo.demoList(acc.id, { folder }); return { total: l.length, unread: l.filter((m) => !m.seen).length }; },
         get: async (acc, uid, folder) => demo.demoGet(acc.id, uid, folder),
         many: async (acc, refs) => refs.map((r) => demo.demoGet(acc.id, r.uid, r.folder)),
         seen: async (acc, uid, folder, on) => demo.demoSeen(acc.id, uid, on),
@@ -83,12 +84,13 @@ export function createMailModule(opts = {}) {
       };
   const real = {
         list: (acc, o) => mail.listMessages(acc, o),
+        stats: (acc, folder) => mail.mailboxStats(acc, folder),
         get: (acc, uid, folder) => mail.getMessage(acc, uid, folder),
         many: (acc, refs) => mail.getMany(acc, refs),
         seen: (acc, uid, folder, on) => mail.setFlag(acc, uid, folder, '\\Seen', on),
         send: (acc, m) => mail.sendMail(acc, m),
       };
-  const io = Object.fromEntries(['list', 'get', 'many', 'seen', 'send'].map((k) => [k, (...a) => (isDemo() ? fake : real)[k](...a)]));
+  const io = Object.fromEntries(['list', 'stats', 'get', 'many', 'seen', 'send'].map((k) => [k, (...a) => (isDemo() ? fake : real)[k](...a)]));
 
   // Caches de tópicos e resumos (memória, por instância).
   const topicIndex = new Map(); // id -> topic
@@ -128,6 +130,14 @@ export function createMailModule(opts = {}) {
     const items = lists.flatMap((r, i) => (r.status === 'fulfilled' ? r.value : (errors.push(`${targets[i].label}: ${r.reason.message}`), [])));
     items.sort((a, b) => new Date(b.date) - new Date(a.date));
     return { items: items.map(({ preview, ...m }) => m), errors };
+  }));
+
+  router.get('/api/stats', h(async (req) => {
+    const { account = 'all', folder = 'INBOX' } = req.query;
+    const rs = await Promise.allSettled(targetsOf(account).map((a) => io.stats(a, folder)));
+    const ok = rs.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+    const total = ok.reduce((n, x) => n + x.total, 0), unread = ok.reduce((n, x) => n + x.unread, 0);
+    return { total, unread, read: total - unread, partial: ok.length < rs.length };
   }));
 
   router.get('/api/message/:account/:uid', h(async (req) => {

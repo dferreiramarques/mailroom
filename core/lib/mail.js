@@ -17,7 +17,7 @@ function cached(key, fn) {
   return value;
 }
 const ck = (acc) => acc.address || acc.id;
-export const invalidateAccount = (acc) => invalidate(`${ck(acc)}:list:`);
+export const invalidateAccount = (acc) => { invalidate(`${ck(acc)}:list:`); invalidate(`${ck(acc)}:stats:`); };
 export function invalidate(prefix) {
   for (const k of cache.keys()) if (k.startsWith(prefix)) cache.delete(k);
 }
@@ -113,6 +113,21 @@ export function listMessages(acc, { folder = 'INBOX', limit = 40, query = '', si
   );
 }
 
+// Contagens da caixa (total e por ler) com duas pesquisas IMAP, sem descarregar mensagens.
+export function mailboxStats(acc, folder = 'INBOX') {
+  return cached(`${ck(acc)}:stats:${folder}`, () =>
+    withClient(acc, async (client) => {
+      const path = await resolveFolder(client, acc, folder);
+      const lock = await client.getMailboxLock(path);
+      try {
+        const all = await client.search(baseCriteria(acc, folder), { uid: true });
+        const unseen = await client.search(baseCriteria(acc, folder, { seen: false }), { uid: true });
+        return { total: all?.length || 0, unread: unseen?.length || 0 };
+      } finally { lock.release(); }
+    })
+  );
+}
+
 export function getMessage(acc, uid, folder = 'INBOX') {
   return cached(`${ck(acc)}:msg:${folder}:${uid}`, () =>
     withClient(acc, async (client) => {
@@ -156,7 +171,7 @@ export async function setFlag(acc, uid, folder, flag, on) {
       lock.release();
     }
   });
-  invalidate(`${ck(acc)}:list:`);
+  invalidateAccount(acc);
 }
 
 export async function sendMail(acc, { to, cc, bcc, subject, text, inReplyTo, references, attachments }) {
