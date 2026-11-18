@@ -66,6 +66,9 @@ if (process.env.APP_PASSWORD) {
   });
 }
 
+// Regresso da autorização do Google (vem do browser externo, sem o token da app; protegido pelo «state» de uso único).
+app.get('/oauth/google', mail.googleCallback);
+
 // Dentro da app de desktop, só a própria janela pode falar com o servidor local.
 if (process.env.MAILROOM_TOKEN) {
   app.use((req, res, next) => (req.get('x-mailroom-token') === process.env.MAILROOM_TOKEN ? next() : res.status(403).end('Acesso só pela app mailroom')));

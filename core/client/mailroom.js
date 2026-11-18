@@ -46,6 +46,10 @@ const SHELL = `
       <button class="nav" data-view="drafts">Rascunhos <span class="count" id="draftCount"></span></button>
     </div>
     <div class="group">
+      <div class="group-label">Agenda</div>
+      <button class="nav" data-view="calendar">Calendário</button>
+    </div>
+    <div class="group">
       <div class="group-label">Prospeção</div>
       <button class="nav" data-view="funnel">Funil <span class="count" id="funnelCount"></span></button>
     </div>
@@ -177,6 +181,7 @@ function mount(root, host, base) {
     });
     $$('.switch button').forEach((b) => { b.classList.toggle('on', b.dataset.mode === state.mode); b.setAttribute('aria-selected', b.dataset.mode === state.mode); });
     $('#draftCount').textContent = state.drafts.length || '';
+    app()?.toggleAttribute('data-wide', state.view === 'calendar'); // o calendário usa a largura toda
   }
   // Painel de leitura vazio: números da caixa, botão de nova mensagem e atalhos.
   const SHORTCUTS = [['j', 'k', 'Seguinte / anterior'], ['r', 'Responder'], ['s', 'Resumir com IA'], ['g', 'Sugerir respostas'], ['c', 'Nova mensagem'], ['/', 'Pesquisar'], ['v', 'Mudar de vista'], ['Esc', 'Fechar / sair do campo']];
@@ -205,7 +210,7 @@ function mount(root, host, base) {
   // e não pode tirar o cursor do «Para» de uma mensagem que entretanto se abriu.
   function busyTyping() {
     const el = root.activeElement;
-    return !!(el && (el.closest('input, textarea, select, [contenteditable="true"]') || el.closest('.focus, .ctx, .research, .modal'))) || !!$('#composeForm');
+    return !!(el && (el.closest('input, textarea, select, [contenteditable="true"]') || el.closest('.focus, .ctx, .research, .modal, .cal-ed'))) || !!$('#composeForm');
   }
   function focusList() { if (busyTyping()) return; const ul = $('#messageList'); ul.tabIndex = -1; ul.focus({ preventScroll: true }); }
 
@@ -631,6 +636,7 @@ function mount(root, host, base) {
         <button class="btn" data-act="suggest">Sugerir respostas<kbd>g</kbd></button>
         ${m.html ? `<button class="btn" data-act="html">Ver original</button>` : ''}
         <button class="btn" data-act="unread">Marcar por ler</button>
+        <button class="btn" data-act="event">Criar evento</button>
       </div>
       <div id="aiBox"></div>
       <div id="bodyBox" class="body">${esc(textOf(m))}</div>
@@ -647,6 +653,7 @@ function mount(root, host, base) {
     if (act === 'suggest') suggest();
     if (act === 'html') showHtml(b);
     if (act === 'unread') markUnread();
+    if (act === 'event') eventFromMessage();
   });
   function showHtml(btn) {
     const m = state.current, box = $('#bodyBox');
@@ -841,7 +848,7 @@ function mount(root, host, base) {
     app().classList.add('reading');
     if (view === 'drafts') { renderDraftList(); renderDraftsHome(); return; }
     if (state.mode === 'classic' && !state.items.length) loadList();
-    ({ funnel: viewFunnel, triage: viewTriage, pitch: viewPitch, publish: viewPublish, agent: viewAgent, settings: viewSettings })[view]?.();
+    ({ calendar: viewCalendar, funnel: viewFunnel, triage: viewTriage, pitch: viewPitch, publish: viewPublish, agent: viewAgent, settings: viewSettings })[view]?.();
   }
 
   async function viewTriage() {
@@ -1352,10 +1359,14 @@ function mount(root, host, base) {
         <div class="actions"><button class="btn primary">Guardar</button></div>
       </form>
 
+      <h2 id="calSettingsTitle">Calendários</h2>
+      <div id="calBox">${spin('A carregar…')}</div>
+
       <h2 id="accountsTitle">Contas</h2>
       <div id="accountsBox"></div>
     </div>`;
     renderAccounts();
+    renderCalSettings();
     renderVersion(true);
 
     $('#setForm').onsubmit = async (e) => { e.preventDefault(); await api('/api/settings', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) }); toast('Guardado'); };
@@ -1402,6 +1413,446 @@ function mount(root, host, base) {
       } catch (err) { status('err', err.message); }
     };
     $('#forgetKey')?.addEventListener('click', async (e) => { e.preventDefault(); await save({ clearKey: true }); toast('Chave apagada'); viewSettings(); });
+  }
+
+  // =====================================================================
+  // Calendário: dia, 3 dias, semana, mês; por baixo, projetos (milestones e deadlines)
+  // =====================================================================
+  const CAL_VIEWS = { day: ['Dia', 1], three: ['3 dias', 3], week: ['Semana', 7], month: ['Mês', 42] };
+  const HOUR_PX = 48;
+  const PM_DAYS = 70;
+  const KIND_LABEL = { event: 'Evento', milestone: 'Milestone', deadline: 'Deadline' };
+  const KIND_ICON = { event: '', milestone: '◆', deadline: '⚑' };
+  const pad2 = (n) => String(n).padStart(2, '0');
+  // Datas em português, sem depender da língua do sistema (o Chromium nem sempre traz a de PT).
+  const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  const MES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+  const DIAS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+  const DIAS_LONGOS = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo'];
+  const wd = (d) => (d.getDay() + 6) % 7;
+  const dMes = (d) => `${d.getDate()} ${MES[d.getMonth()]}`;
+  const ymdOf = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const dayStart = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+  const plusDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  const mondayOf = (d) => plusDays(dayStart(d), -((new Date(d).getDay() + 6) % 7));
+  const fromYmd = (s) => new Date(`${s}T00:00:00`);
+  const hhmm = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  // Início e fim de um evento como datas locais (os de dia inteiro vêm como AAAA-MM-DD, fim exclusivo).
+  const evStart = (e) => (e.allDay ? fromYmd(e.start) : new Date(e.start));
+  const evEnd = (e) => (e.allDay ? fromYmd(e.end) : new Date(e.end));
+  state.cal = { view: ls.get('mailroom.calView') || 'week', date: dayStart(new Date()), events: [], sources: [], errors: [], projects: [], loading: false, defaultTarget: 'local' };
+
+  function calRange() {
+    const c = state.cal;
+    if (c.view === 'month') { const first = new Date(c.date.getFullYear(), c.date.getMonth(), 1); const s = mondayOf(first); return [s, plusDays(s, 42)]; }
+    if (c.view === 'week') { const s = mondayOf(c.date); return [s, plusDays(s, 7)]; }
+    const n = CAL_VIEWS[c.view][1]; return [dayStart(c.date), plusDays(c.date, n)];
+  }
+  const pmRange = () => { const s = plusDays(mondayOf(state.cal.date), -7); return [s, plusDays(s, PM_DAYS)]; };
+  function calTitle() {
+    const c = state.cal, [s, e] = calRange();
+    const d = c.date;
+    if (c.view === 'month') return `${MESES[d.getMonth()][0].toUpperCase()}${MESES[d.getMonth()].slice(1)} ${d.getFullYear()}`;
+    if (c.view === 'day') return `${DIAS_LONGOS[wd(d)]}, ${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}`;
+    const last = plusDays(e, -1);
+    const same = s.getMonth() === last.getMonth();
+    return `${s.getDate()}${same ? '' : ` ${MES[s.getMonth()]}`} – ${last.getDate()} ${MES[last.getMonth()]} ${last.getFullYear()}`;
+  }
+
+  async function viewCalendar() {
+    app().toggleAttribute('data-wide', true);
+    $('#reader').innerHTML = `<div class="cal">
+      <header class="cal-head">
+        <div class="cal-nav">
+          <button class="btn" data-c="today" title="Hoje (t)">Hoje</button>
+          <button class="icon" data-c="prev" aria-label="Anterior (←)" title="Anterior (←)">‹</button>
+          <button class="icon" data-c="next" aria-label="Seguinte (→)" title="Seguinte (→)">›</button>
+          <h1 id="calTitle"></h1>
+        </div>
+        <div class="seg cal-seg" role="tablist">${Object.entries(CAL_VIEWS).map(([k, [l]]) => `<button role="tab" data-cv="${k}">${l}</button>`).join('')}</div>
+        <button class="btn primary" data-c="new" title="Novo evento (n)">Novo evento</button>
+      </header>
+      <div class="cal-sources" id="calSources"></div>
+      <div class="errors" id="calErrors"></div>
+      <div id="calBody" class="cal-body">${spin('A carregar o calendário…')}</div>
+      <section class="pm" aria-label="Projetos">
+        <div class="pm-head"><h2>Projetos</h2><span class="muted" id="pmRange"></span><span class="grow"></span><button class="btn" data-c="newProject">Novo projeto</button></div>
+        <div id="pmBody"></div>
+      </section>
+    </div>`;
+    await loadCalendar();
+  }
+
+  async function loadCalendar() {
+    const c = state.cal;
+    const [a, b] = calRange(), [pa, pb] = pmRange();
+    const from = new Date(Math.min(a, pa)), to = new Date(Math.max(b, pb));
+    const token = (loadCalendar.t = (loadCalendar.t || 0) + 1);
+    $('#calTitle') && ($('#calTitle').textContent = calTitle());
+    $$('[data-cv]').forEach((x) => x.classList.toggle('on', x.dataset.cv === c.view));
+    try {
+      const [r, projects] = await Promise.all([api(`/api/calendar/events?${new URLSearchParams({ from: from.toISOString(), to: to.toISOString() })}`), api('/api/projects')]);
+      if (token !== loadCalendar.t || !$('.cal')) return;
+      Object.assign(c, { events: r.events, sources: r.sources, errors: r.errors, defaultTarget: r.defaultTarget, projects });
+    } catch (e) { if ($('#calBody')) $('#calBody').innerHTML = `<p class="muted">Não consegui carregar o calendário: ${esc(e.message)}</p>`; return; }
+    renderCalendar();
+  }
+
+  function renderCalendar() {
+    const c = state.cal;
+    if (!$('.cal')) return;
+    $('#calTitle').textContent = calTitle();
+    $$('[data-cv]').forEach((x) => x.classList.toggle('on', x.dataset.cv === c.view));
+    $('#calSources').innerHTML = c.sources.map((s) => `<button class="src ${s.hidden ? 'off' : ''}" data-src="${esc(s.key)}" style="--c:${esc(s.color)}" title="${s.hidden ? 'Mostrar' : 'Esconder'}"><span class="sw"></span>${esc(s.name)}</button>`).join('')
+      + `<button class="src link" data-c="settings">Ligar calendários…</button>`;
+    $('#calErrors').textContent = c.errors.join(' · ');
+    const [s, e] = calRange();
+    const evs = c.events.filter((x) => evEnd(x) > s && evStart(x) < e);
+    $('#calBody').innerHTML = c.view === 'month' ? monthGrid(s, evs) : timeGrid(s, CAL_VIEWS[c.view][1], evs);
+    if (c.view !== 'month') { const sc = $('.tg-scroll'); if (sc && !sc.dataset.set) { sc.scrollTop = 7.5 * HOUR_PX; sc.dataset.set = 1; } }
+    renderPM();
+  }
+
+  const chip = (e, withTime) => `<button class="ev k-${esc(e.kind)} ${e.readonly ? 'ro' : ''}" data-ev="${esc(e.id)}" style="--c:${esc(e.color || srcColor(e.source))}" title="${esc(e.title)}${e.calendar ? ` · ${esc(e.calendar)}` : ''}">${KIND_ICON[e.kind] ? `<i>${KIND_ICON[e.kind]}</i>` : ''}${withTime && !e.allDay ? `<span class="t">${hhmm(evStart(e))}</span>` : ''}${esc(e.title)}</button>`;
+  const srcColor = (key) => state.cal.sources.find((x) => x.key === key)?.color || '#77736c';
+
+  function timeGrid(start, n, evs) {
+    const days = Array.from({ length: n }, (_, i) => plusDays(start, i));
+    const today = ymdOf(new Date());
+    const allDay = (d) => evs.filter((e) => (e.allDay || evEnd(e) - evStart(e) >= 864e5) && evStart(e) < plusDays(d, 1) && evEnd(e) > d);
+    const timed = (d) => evs.filter((e) => !e.allDay && evEnd(e) - evStart(e) < 864e5 && evStart(e) < plusDays(d, 1) && evEnd(e) > d);
+    const col = (d) => {
+      // Sobreposições: cada grupo de eventos que se tocam divide a largura em colunas.
+      const list = timed(d).map((e) => {
+        const s0 = Math.max(evStart(e), d), e0 = Math.min(evEnd(e), plusDays(d, 1));
+        return { e, top: (s0 - d) / 60000, bot: Math.max((e0 - d) / 60000, (s0 - d) / 60000 + 20) };
+      }).sort((a, b) => a.top - b.top || b.bot - a.bot);
+      let group = [], groupEnd = -1; const out = [];
+      const flush = () => { const cols = []; for (const it of group) { let k = cols.findIndex((end) => end <= it.top); if (k < 0) { k = cols.length; cols.push(0); } cols[k] = it.bot; it.col = k; } for (const it of group) it.ncol = cols.length; out.push(...group); group = []; };
+      for (const it of list) { if (it.top >= groupEnd && group.length) flush(); group.push(it); groupEnd = Math.max(groupEnd, it.bot); }
+      if (group.length) flush();
+      return out.map(({ e, top, bot, col: k, ncol }) => `<button class="tev k-${esc(e.kind)} ${e.readonly ? 'ro' : ''} ${bot - top < 50 ? 'short' : ''}" data-ev="${esc(e.id)}" style="--c:${esc(e.color || srcColor(e.source))};top:${top * HOUR_PX / 60}px;height:${Math.max(18, (bot - top) * HOUR_PX / 60 - 2)}px;left:calc(${(k / ncol) * 100}% + 2px);width:calc(${100 / ncol}% - 4px)" title="${esc(e.title)}"><span class="t">${hhmm(evStart(e))}<span class="te">–${hhmm(evEnd(e))}</span></span><b>${KIND_ICON[e.kind] ? `${KIND_ICON[e.kind]} ` : ''}${esc(e.title)}</b>${e.location ? `<span class="loc">${esc(e.location)}</span>` : ''}</button>`).join('');
+    };
+    const now = new Date();
+    const nowLine = days.some((d) => ymdOf(d) === today) ? `<div class="tg-now" style="top:${(now - dayStart(now)) / 60000 * HOUR_PX / 60}px;grid-column:${days.findIndex((d) => ymdOf(d) === today) + 2}"></div>` : '';
+    return `<div class="tg" style="--days:${n}">
+      <div class="tg-head"><div></div>${days.map((d) => `<button class="tg-dh ${ymdOf(d) === today ? 'today' : ''}" data-goto="${ymdOf(d)}"><span>${DIAS[wd(d)]}</span><b>${d.getDate()}</b></button>`).join('')}</div>
+      <div class="tg-allday"><div class="tg-lbl">dia</div>${days.map((d) => `<div class="tg-ad" data-day="${ymdOf(d)}">${allDay(d).map((e) => chip(e)).join('')}</div>`).join('')}</div>
+      <div class="tg-scroll"><div class="tg-body">
+        <div class="tg-hours">${Array.from({ length: 24 }, (_, h) => `<span style="top:${h * HOUR_PX}px">${h ? `${pad2(h)}:00` : ''}</span>`).join('')}</div>
+        ${days.map((d) => `<div class="tg-col ${ymdOf(d) === today ? 'today' : ''}" data-day="${ymdOf(d)}">${col(d)}</div>`).join('')}
+        ${nowLine}
+      </div></div>
+    </div>`;
+  }
+
+  function monthGrid(start, evs) {
+    const month = state.cal.date.getMonth(), today = ymdOf(new Date());
+    const cells = Array.from({ length: 42 }, (_, i) => plusDays(start, i));
+    const heads = cells.slice(0, 7).map((d) => `<div>${DIAS[wd(d)]}</div>`).join('');
+    return `<div class="mg"><div class="mg-head">${heads}</div><div class="mg-grid">${cells.map((d) => {
+      const list = evs.filter((e) => evStart(e) < plusDays(d, 1) && evEnd(e) > d).sort((a, b) => (b.allDay - a.allDay) || (evStart(a) - evStart(b)));
+      const more = list.length - 4;
+      return `<div class="mg-cell ${d.getMonth() !== month ? 'other' : ''} ${ymdOf(d) === today ? 'today' : ''}" data-day="${ymdOf(d)}">
+        <button class="mg-num" data-goto="${ymdOf(d)}">${d.getDate()}</button>
+        ${list.slice(0, more > 0 ? 3 : 4).map((e) => chip(e, true)).join('')}${more > 0 ? `<button class="mg-more" data-goto="${ymdOf(d)}">+${more + 1} mais</button>` : ''}
+      </div>`;
+    }).join('')}</div></div>`;
+  }
+
+  // ---------- projetos ----------
+  function renderPM() {
+    const c = state.cal, [s, e] = pmRange();
+    const pos = (d) => Math.max(0, Math.min(100, ((d - s) / (e - s)) * 100));
+    $('#pmRange').textContent = `${dMes(s)} – ${dMes(plusDays(e, -1))} ${plusDays(e, -1).getFullYear()}`;
+    const inRange = (x) => evEnd(x) > s && evStart(x) < e;
+    const marker = (x) => `<button class="pm-mk k-${esc(x.kind)}" data-ev="${esc(x.id)}" style="left:${pos(evStart(x))}%;--c:${esc(x.color || srcColor(x.source))}" title="${esc(KIND_LABEL[x.kind])} · ${esc(x.title)} · ${dMes(evStart(x))}">${x.kind === 'event' ? '•' : KIND_ICON[x.kind]}</button>`;
+    const bar = (a, b, color, label) => (a && b && b > s && a < e ? `<div class="pm-bar" style="left:${pos(a)}%;width:${Math.max(0.6, pos(b) - pos(a))}%;--c:${esc(color)}" title="${esc(label)}"></div>` : '');
+    const scale = [];
+    for (let d = new Date(s); d < e; d = plusDays(d, 7)) scale.push(`<span style="left:${pos(d)}%">${dMes(d)}</span>`);
+    const todayX = pos(new Date());
+    const row = (label, track, extra = '') => `<div class="pm-row ${extra}"><div class="pm-label">${label}</div><div class="pm-track"><i class="pm-today" style="left:${todayX}%"></i>${track}</div></div>`;
+    const rows = [];
+    // 1. projetos criados no mailroom
+    for (const p of c.projects) {
+      const items = c.events.filter((x) => x.projectId === p.id);
+      const ds = items.map(evStart);
+      const a = p.start ? fromYmd(p.start) : ds.length ? new Date(Math.min(...ds)) : null;
+      const b = p.end ? plusDays(fromYmd(p.end), 1) : ds.length ? plusDays(dayStart(new Date(Math.max(...ds))), 1) : null;
+      rows.push(row(`<button class="pm-name" data-proj="${esc(p.id)}"><span class="sw" style="--c:${esc(p.color)}"></span>${esc(p.name)}${p.done ? ' <span class="muted">· concluído</span>' : ''}</button><button class="pm-add" data-additem="${esc(p.id)}" title="Novo milestone ou deadline" aria-label="Novo marco em ${esc(p.name)}">＋</button>`,
+        bar(a, b, p.color, `${p.name}${p.start ? ` · ${p.start}` : ''}${p.end ? ` → ${p.end}` : ''}`) + items.filter(inRange).map(marker).join(''), p.done ? 'done' : ''));
+    }
+    // 2. marcos de calendários sem projeto
+    const loose = c.events.filter((x) => !x.projectId && x.source !== 'funnel' && x.kind !== 'event' && inRange(x));
+    if (loose.length) rows.push(row('<span class="pm-name static"><span class="sw" style="--c:#77736c"></span>Calendários</span>', loose.map(marker).join('')));
+    // 3. funis
+    const streams = new Map();
+    for (const x of c.events.filter((y) => y.source === 'funnel' && inRange(y))) (streams.get(x.funnelId) || streams.set(x.funnelId, []).get(x.funnelId)).push(x);
+    for (const [id, items] of streams) {
+      const name = (items[0].title.split(' · ').at(-1) || id);
+      const ds = items.map(evStart);
+      rows.push(row(`<button class="pm-name" data-funnel="${esc(id)}"><span class="sw" style="--c:#b4441c"></span>Funil · ${esc(name)}</button>`,
+        bar(new Date(Math.min(...ds)), plusDays(new Date(Math.max(...ds)), 1), '#b4441c', `Funil ${name}`) + items.map(marker).join(''), 'funnel'));
+    }
+    $('#pmBody').innerHTML = rows.length
+      ? `<div class="pm-grid">${row('', scale.join(''), 'pm-scale')}${rows.join('')}</div><p class="hint">◆ milestone · ⚑ deadline · • pitch enviado. Carrega num marco para o abrir; no ＋ de um projeto para lhe juntar um marco.</p>`
+      : `<div class="card">Ainda não há projetos nem marcos neste período. Cria um projeto para acompanhar milestones e deadlines, ou marca um evento do calendário como milestone ou deadline.</div>`;
+  }
+
+  // ---------- editor de eventos ----------
+  function writableTargets() { return state.cal.sources.filter((s) => s.writable && s.type !== 'funnel' && s.enabled !== false); }
+  function eventEditor(ev = {}, isNew = !ev.id) {
+    $('.cal-ed')?.remove();
+    const c = state.cal;
+    const allDay = Boolean(ev.allDay);
+    const s = ev.start ? evStart(ev) : (() => { const d = new Date(); d.setMinutes(0, 0, 0); d.setHours(d.getHours() + 1); return d; })();
+    const e = ev.end ? evEnd(ev) : new Date(s.getTime() + 3600e3);
+    const endShown = allDay ? plusDays(e, -1) : e; // no ecrã, o último dia é inclusivo
+    const locked = !isNew && ev.source?.startsWith('caldav:') && ev.recurring;
+    const targets = writableTargets();
+    const target = ev.target || (targets.some((t) => t.key === c.defaultTarget) ? c.defaultTarget : 'local');
+    const p = document.createElement('div');
+    p.className = 'cal-ed'; p.setAttribute('role', 'dialog'); p.setAttribute('aria-label', isNew ? 'Novo evento' : 'Evento');
+    p.innerHTML = `<form class="cal-ed-in" id="evForm">
+      <div class="compose-head"><h1>${ev.readonly ? esc(KIND_LABEL[ev.kind || 'event']) : `${isNew ? 'Novo' : 'Editar'} ${esc(KIND_LABEL[ev.kind || 'event']).toLowerCase()}`}</h1><button type="button" class="close" data-x aria-label="Fechar (Esc)" title="Fechar (Esc)">×</button></div>
+      ${ev.readonly ? `<p class="hint">${ev.source === 'funnel' ? 'Data do funil: muda-se no Funil.' : 'Este calendário é só de leitura.'}</p>` : ''}
+      <div class="field"><label for="evTitle">Título</label><input id="evTitle" name="title" value="${esc(ev.title || '')}" required ${ev.readonly ? 'readonly' : ''} /></div>
+      <div class="seg ev-kind" role="radiogroup" aria-label="Tipo">${Object.entries(KIND_LABEL).map(([k, l]) => `<button type="button" data-kind="${k}" class="${(ev.kind || 'event') === k ? 'on' : ''}" ${ev.readonly ? 'disabled' : ''}>${KIND_ICON[k] ? `${KIND_ICON[k]} ` : ''}${l}</button>`).join('')}</div>
+      <label class="checks"><input type="checkbox" name="allDay" ${allDay ? 'checked' : ''} ${ev.readonly || locked ? 'disabled' : ''}/> Dia inteiro</label>
+      <div class="row">
+        <div class="field"><label for="evSD">Início</label><input id="evSD" type="date" name="sd" value="${ymdOf(s)}" ${ev.readonly || locked ? 'disabled' : ''}/></div>
+        <div class="field time"><label for="evST">Hora</label><input id="evST" type="time" name="st" value="${hhmm(s)}" ${ev.readonly || locked ? 'disabled' : ''}/></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="evED">Fim</label><input id="evED" type="date" name="ed" value="${ymdOf(endShown)}" ${ev.readonly || locked ? 'disabled' : ''}/></div>
+        <div class="field time"><label for="evET">Hora</label><input id="evET" type="time" name="et" value="${hhmm(e)}" ${ev.readonly || locked ? 'disabled' : ''}/></div>
+      </div>
+      ${locked ? '<p class="hint">Evento de uma série: as datas e horas mudam-se no calendário de origem. Aqui podes mudar o título, o tipo, o projeto, o local e as notas da série.</p>' : ''}
+      <div class="row">
+        <div class="field"><label for="evTarget">Calendário</label>${isNew
+          ? `<select id="evTarget" name="target">${targets.map((t) => `<option value="${esc(t.key)}" ${t.key === target ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`
+          : `<input id="evTarget" value="${esc(ev.calendar || c.sources.find((x) => x.key === ev.source)?.name || ev.source)}" disabled />`}</div>
+        <div class="field"><label for="evProj">Projeto</label><select id="evProj" name="projectId" ${ev.readonly ? 'disabled' : ''}><option value="">— nenhum —</option>${c.projects.map((x) => `<option value="${esc(x.id)}" ${x.id === ev.projectId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
+      </div>
+      <div class="field"><label for="evLoc">Local</label><input id="evLoc" name="location" value="${esc(ev.location || '')}" ${ev.readonly ? 'readonly' : ''}/></div>
+      <div class="field"><label for="evNotes">Notas</label><textarea id="evNotes" name="notes" ${ev.readonly ? 'readonly' : ''}>${esc(ev.notes || '')}</textarea></div>
+      ${ev.ref ? '<p><a href="#" data-openref>Abrir o e-mail de origem</a></p>' : ''}
+      ${ev.url ? `<p><a href="${esc(ev.url)}" target="_blank" rel="noopener">Abrir no Google Calendar</a></p>` : ''}
+      <div id="evStatus" class="status-line"></div>
+      <div class="actions">
+        ${ev.readonly ? (ev.source === 'funnel' ? '<button type="button" class="btn primary" data-funnel>Abrir o Funil</button>' : '') : `<button class="btn primary">${isNew ? 'Criar' : 'Guardar'}</button>`}
+        ${!isNew && !ev.readonly ? '<button type="button" class="btn danger" data-del>Apagar</button>' : ''}
+        <button type="button" class="btn" data-x>Fechar</button>
+      </div>
+    </form>`;
+    app().append(p);
+    const f = $('#evForm', p);
+    let kind = ev.kind || 'event';
+    const syncAllDay = () => { const ad = f.allDay.checked; $$('.field.time', p).forEach((x) => (x.hidden = ad)); };
+    f.allDay.onchange = syncAllDay; syncAllDay();
+    $$('[data-kind]', p).forEach((b) => (b.onclick = () => {
+      kind = b.dataset.kind; $$('[data-kind]', p).forEach((x) => x.classList.toggle('on', x === b));
+      if (kind !== 'event' && isNew && !f.allDay.checked) { f.allDay.checked = true; syncAllDay(); } // marcos costumam ser de dia inteiro
+      $('h1', p).textContent = `${isNew ? 'Novo' : 'Editar'} ${KIND_LABEL[kind].toLowerCase()}`;
+    }));
+    // Mudar o início puxa o fim, mantendo a duração.
+    const dur = e - s;
+    f.sd.onchange = () => { if (!f.sd.value) return; const ns = new Date(`${f.sd.value}T${f.st.value || '09:00'}`); const ne = new Date(ns.getTime() + dur); f.ed.value = ymdOf(f.allDay.checked ? plusDays(ne, -1) : ne); if (!f.allDay.checked) f.et.value = hhmm(ne); };
+    f.st.onchange = f.sd.onchange;
+    const close = () => { p.remove(); host.focus({ preventScroll: true }); };
+    state.closeEditor = close;
+    $$('[data-x]', p).forEach((b) => (b.onclick = close));
+    $('[data-funnel]', p)?.addEventListener('click', () => { close(); openView('funnel'); });
+    $('[data-openref]', p)?.addEventListener('click', (x) => { x.preventDefault(); const [account, folder, uid] = String(ev.ref).split(':'); close(); state.view = 'mail'; app().removeAttribute('data-wide'); if (state.mode !== 'classic') setMode('classic'); highlightNav(); openMessage({ account, folder, uid: Number(uid) }); });
+    const st = (cls, html) => { const el = $('#evStatus', p); el.className = `status-line ${cls}`; el.innerHTML = html; };
+    f.onsubmit = async (x) => {
+      x.preventDefault();
+      const ad = f.allDay.checked;
+      const body = {
+        title: f.title.value, kind, allDay: ad, location: f.location.value, notes: f.notes.value, projectId: f.projectId.value, ref: ev.ref || '',
+        start: ad ? f.sd.value : new Date(`${f.sd.value}T${f.st.value || '00:00'}`).toISOString(),
+        end: ad ? ymdOf(plusDays(fromYmd(f.ed.value || f.sd.value), 1)) : new Date(`${f.ed.value || f.sd.value}T${f.et.value || '00:00'}`).toISOString(),
+      };
+      if (locked) { body.start = ev.start; body.end = ev.end; body.allDay = ev.allDay; }
+      st('', spin('A guardar…'));
+      try {
+        if (isNew) await api('/api/calendar/events', { method: 'POST', body: { ...body, target: f.target.value } });
+        else await api(`/api/calendar/events/${encodeURIComponent(ev.id)}`, { method: 'PUT', body });
+        close(); toast(isNew ? 'Evento criado' : 'Evento guardado');
+        if ($('.cal')) loadCalendar();
+      } catch (err) { st('err', esc(err.message)); }
+    };
+    $('[data-del]', p)?.addEventListener('click', async (x) => {
+      const b = x.currentTarget;
+      if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = 'Confirmar: apagar'; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = 'Apagar'; } }, 4000); return; }
+      try { await api(`/api/calendar/events/${encodeURIComponent(ev.id)}`, { method: 'DELETE' }); close(); toast('Evento apagado'); if ($('.cal')) loadCalendar(); }
+      catch (err) { st('err', esc(err.message)); }
+    });
+    (ev.readonly ? $('[data-x]', p) : f.title).focus();
+  }
+
+  function projectEditor(pr = {}) {
+    $('.cal-ed')?.remove();
+    const isNew = !pr.id;
+    const p = document.createElement('div');
+    p.className = 'cal-ed'; p.setAttribute('role', 'dialog'); p.setAttribute('aria-label', isNew ? 'Novo projeto' : 'Projeto');
+    p.innerHTML = `<form class="cal-ed-in" id="prForm">
+      <div class="compose-head"><h1>${isNew ? 'Novo projeto' : 'Projeto'}</h1><button type="button" class="close" data-x aria-label="Fechar (Esc)">×</button></div>
+      <div class="row"><div class="field"><label for="prName">Nome</label><input id="prName" name="name" value="${esc(pr.name || '')}" required /></div>
+        <div class="field" style="max-width:90px"><label for="prColor">Cor</label><input id="prColor" type="color" name="color" value="${esc(pr.color || '#3b6fd8')}" /></div></div>
+      <div class="row"><div class="field"><label for="prStart">Início</label><input id="prStart" type="date" name="start" value="${esc(pr.start || '')}" /></div>
+        <div class="field"><label for="prEnd">Fim</label><input id="prEnd" type="date" name="end" value="${esc(pr.end || '')}" /></div></div>
+      <div class="field"><label for="prNotes">Notas</label><textarea id="prNotes" name="notes">${esc(pr.notes || '')}</textarea></div>
+      ${isNew ? '' : `<label class="checks"><input type="checkbox" name="done" ${pr.done ? 'checked' : ''}/> Concluído</label>`}
+      <p class="hint">Os milestones e deadlines de um projeto são eventos do calendário com o projeto escolhido. Podem estar no calendário do mailroom, no Spacemail ou no Google.</p>
+      <div id="prStatus" class="status-line"></div>
+      <div class="actions"><button class="btn primary">${isNew ? 'Criar' : 'Guardar'}</button>${isNew ? '' : '<button type="button" class="btn" data-additem>Novo marco</button><button type="button" class="btn danger" data-del>Apagar projeto</button>'}<button type="button" class="btn" data-x>Fechar</button></div>
+    </form>`;
+    app().append(p);
+    const f = $('#prForm', p);
+    const close = () => { p.remove(); host.focus({ preventScroll: true }); };
+    state.closeEditor = close;
+    $$('[data-x]', p).forEach((b) => (b.onclick = close));
+    f.onsubmit = async (x) => {
+      x.preventDefault();
+      const body = { name: f.name.value, color: f.color.value, start: f.start.value, end: f.end.value, notes: f.notes.value, done: f.done?.checked || false };
+      try { if (isNew) await api('/api/projects', { method: 'POST', body }); else await api(`/api/projects/${pr.id}`, { method: 'PUT', body }); close(); toast(isNew ? 'Projeto criado' : 'Projeto guardado'); loadCalendar(); }
+      catch (err) { $('#prStatus', p).className = 'status-line err'; $('#prStatus', p).textContent = err.message; }
+    };
+    $('[data-additem]', p)?.addEventListener('click', () => { close(); newMilestone(pr.id); });
+    $('[data-del]', p)?.addEventListener('click', async (x) => {
+      const b = x.currentTarget;
+      if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = 'Confirmar: apagar o projeto e os marcos do mailroom'; return; }
+      await api(`/api/projects/${pr.id}`, { method: 'DELETE' }); close(); toast('Projeto apagado'); loadCalendar();
+    });
+    f.name.focus();
+  }
+  const newMilestone = (projectId) => { const d = ymdOf(new Date()); eventEditor({ kind: 'milestone', allDay: true, start: d, end: ymdOf(plusDays(new Date(), 1)), projectId, target: 'local' }); };
+
+  // Criar um evento a partir do e-mail aberto.
+  function eventFromMessage() {
+    const m = state.current; if (!m) return;
+    const open = () => eventEditor({
+      title: m.subject || '', notes: `De: ${whoFull(m.from)}\n${new Date(m.date).toLocaleString('pt-PT')}\n\n${textOf(m).slice(0, 600)}`,
+      ref: `${m.account}:${m.folder}:${m.uid}`,
+    }, true);
+    if (state.cal.sources.length) open();
+    else Promise.all([api('/api/calendar/events?' + new URLSearchParams({ from: new Date().toISOString(), to: plusDays(new Date(), 1).toISOString() })), api('/api/projects')])
+      .then(([r, pr]) => { Object.assign(state.cal, { sources: r.sources, defaultTarget: r.defaultTarget, projects: pr }); open(); }).catch((e) => toast('Erro: ' + e.message));
+  }
+
+  // ---------- interação ----------
+  $('#reader').addEventListener('click', async (e) => {
+    if (!e.target.closest('.cal')) return;
+    const c = state.cal;
+    const go = (fn) => { fn(); ls.set('mailroom.calView', c.view); loadCalendar(); };
+    const step = c.view === 'month' ? 0 : CAL_VIEWS[c.view][1];
+    const cmd = e.target.closest('[data-c]')?.dataset.c;
+    if (cmd === 'today') return go(() => { c.date = dayStart(new Date()); });
+    if (cmd === 'prev') return go(() => { c.date = c.view === 'month' ? new Date(c.date.getFullYear(), c.date.getMonth() - 1, 1) : plusDays(c.date, -step); });
+    if (cmd === 'next') return go(() => { c.date = c.view === 'month' ? new Date(c.date.getFullYear(), c.date.getMonth() + 1, 1) : plusDays(c.date, step); });
+    if (cmd === 'new') return eventEditor({}, true);
+    if (cmd === 'newProject') return projectEditor();
+    if (cmd === 'settings') { openView('settings'); setTimeout(() => $('#calSettingsTitle')?.scrollIntoView({ block: 'start' }), 300); return; }
+    const cv = e.target.closest('[data-cv]')?.dataset.cv;
+    if (cv) return go(() => { c.view = cv; });
+    const goto = e.target.closest('[data-goto]')?.dataset.goto;
+    if (goto) return go(() => { c.date = fromYmd(goto); c.view = 'day'; });
+    const src = e.target.closest('[data-src]')?.dataset.src;
+    if (src) {
+      const hidden = c.sources.filter((s) => s.hidden).map((s) => s.key);
+      const next = hidden.includes(src) ? hidden.filter((k) => k !== src) : [...hidden, src];
+      await api('/api/calendar/config', { method: 'PUT', body: { hidden: next } }); return loadCalendar();
+    }
+    const evId = e.target.closest('[data-ev]')?.dataset.ev;
+    if (evId) { const ev = c.events.find((x) => x.id === evId); if (ev) eventEditor(ev, false); return; }
+    const pid = e.target.closest('[data-proj]')?.dataset.proj;
+    if (pid) return projectEditor(c.projects.find((x) => x.id === pid));
+    const addItem = e.target.closest('[data-additem]')?.dataset.additem;
+    if (addItem) return newMilestone(addItem);
+    if (e.target.closest('[data-funnel]')) return openView('funnel');
+    // Clicar num espaço vazio cria um evento ali.
+    const colEl = e.target.closest('.tg-col');
+    if (colEl) {
+      const y = e.clientY - colEl.getBoundingClientRect().top;
+      const mins = Math.max(0, Math.min(23 * 60 + 30, Math.floor((y / HOUR_PX) * 2) * 30));
+      const s = new Date(`${colEl.dataset.day}T${pad2(Math.floor(mins / 60))}:${pad2(mins % 60)}`);
+      return eventEditor({ start: s.toISOString(), end: new Date(s.getTime() + 3600e3).toISOString() }, true);
+    }
+    const dayEl = e.target.closest('.tg-ad, .mg-cell');
+    if (dayEl) return eventEditor({ allDay: true, start: dayEl.dataset.day, end: ymdOf(plusDays(fromYmd(dayEl.dataset.day), 1)) }, true);
+  });
+
+  // ---------- definições: calendários ----------
+  async function renderCalSettings() {
+    const box = $('#calBox'); if (!box) return;
+    let cfg;
+    try { cfg = await api('/api/calendar/config'); } catch (e) { box.textContent = 'Erro: ' + e.message; return; }
+    const targets = cfg.sources.filter((s) => s.writable && s.type !== 'funnel');
+    box.innerHTML = `
+      <div class="card">
+        <div class="c-title">Calendário por omissão</div>
+        <div class="field" style="margin:0"><select id="calDefault">${targets.map((t) => `<option value="${esc(t.key)}" ${t.key === cfg.defaultTarget ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>
+        <p class="hint" style="margin:8px 0 0">Onde ficam os eventos novos, se não escolheres outro.</p>
+      </div>
+      ${cfg.caldav.map((a) => `<div class="card" data-dav="${esc(a.account)}">
+        <div class="c-title">${esc(a.address)} <span class="muted" style="font-weight:400">· CalDAV</span></div>
+        ${a.connected ? `<div class="checks-col">${a.calendars.map((c) => `<label class="checks"><input type="checkbox" value="${esc(c.href)}" ${c.enabled !== false ? 'checked' : ''}/> <span class="sw" style="--c:${esc(c.color)}"></span>${esc(c.name)}</label>`).join('')}</div>` : ''}
+        <div class="row" style="align-items:flex-end"><div class="field" style="margin:0"><label>Endereço CalDAV</label><input name="url" value="${esc(a.url || a.guess)}" placeholder="https://caldav.exemplo.com/" /></div>
+          <button class="btn ${a.connected ? '' : 'primary'}" data-davgo>${a.connected ? 'Procurar outra vez' : 'Ligar calendário'}</button>${a.connected ? '<button class="btn danger" data-davoff>Desligar</button>' : ''}</div>
+        <div class="status-line" data-davst></div>
+        <p class="hint" style="margin:6px 0 0">Usa a mesma palavra-passe da conta de correio. No Spacemail o endereço é https://caldav.spacemail.com/.</p>
+      </div>`).join('')}
+      <div class="card" id="gCard">
+        <div class="c-title">Google Calendar ${cfg.google.connected ? `<span class="muted" style="font-weight:400">· ligado${cfg.google.email ? ` (${esc(cfg.google.email)})` : ''}</span>` : ''}</div>
+        ${cfg.google.connected ? `<div class="checks-col">${cfg.google.calendars.map((c) => `<label class="checks"><input type="checkbox" value="${esc(c.id)}" ${c.enabled !== false ? 'checked' : ''}/> <span class="sw" style="--c:${esc(c.color)}"></span>${esc(c.name)}${c.writable ? '' : ' <span class="muted">(só leitura)</span>'}</label>`).join('')}</div>
+          <div class="actions" style="margin:8px 0 0"><button class="btn" data-grefresh>Atualizar lista</button><button class="btn danger" data-goff>Desligar</button></div>` : `
+          <p class="muted" style="margin-top:0">O Google só deixa apps externas usar o calendário com uma autorização própria (OAuth). Faz-se uma vez:</p>
+          <ol class="steps">
+            <li>Em <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">console.cloud.google.com</a>, cria um projeto (ex.: «mailroom»).</li>
+            <li>Ativa a <a href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com" target="_blank" rel="noopener">Google Calendar API</a>.</li>
+            <li>Em <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener">Google Auth Platform</a>, configura o ecrã de consentimento como <b>Externo</b>, junta o teu e-mail como utilizador de teste e, em «Público», carrega em <b>Publicar app</b> (sem isso, a ligação expira ao fim de 7 dias).</li>
+            <li>Em «Clientes», cria um cliente OAuth do tipo <b>App para computador</b> e copia o ID e o segredo para aqui.</li>
+          </ol>
+          <div class="row"><div class="field"><label for="gId">ID de cliente</label><input id="gId" value="${esc(cfg.google.clientId)}" placeholder="…apps.googleusercontent.com" /></div>
+            <div class="field"><label for="gSecret">Segredo do cliente</label><input id="gSecret" type="password" autocomplete="off" placeholder="${cfg.google.hasSecret ? 'guardado — escreve para substituir' : 'GOCSPX-…'}" /></div></div>
+          <div class="actions" style="margin:0"><button class="btn primary" data-gconnect>Ligar ao Google</button></div>
+          <p class="hint">Abre o browser para autorizares. O mailroom só pede acesso ao calendário.</p>`}
+        <div class="status-line" id="gStatus"></div>
+      </div>`;
+    $('#calDefault').onchange = async (e) => { await api('/api/calendar/config', { method: 'PUT', body: { defaultTarget: e.target.value } }); toast('Guardado'); };
+    $$('[data-dav]', box).forEach((card) => {
+      const accId = card.dataset.dav;
+      const st = (cls, html) => { const el = $('[data-davst]', card); el.className = `status-line ${cls}`; el.innerHTML = html; };
+      $('[data-davgo]', card).onclick = async () => {
+        st('', spin('A procurar calendários…'));
+        try { const r = await api(`/api/calendar/caldav/${encodeURIComponent(accId)}`, { method: 'POST', body: { url: $('[name=url]', card).value } }); toast(`${r.calendars.length} calendário(s) ligados`); renderCalSettings(); }
+        catch (e) { st('err', esc(e.message)); }
+      };
+      $('[data-davoff]', card)?.addEventListener('click', async () => { await api(`/api/calendar/caldav/${encodeURIComponent(accId)}`, { method: 'DELETE' }); renderCalSettings(); });
+      $$('input[type=checkbox]', card).forEach((x) => (x.onchange = async () => {
+        await api(`/api/calendar/caldav/${encodeURIComponent(accId)}`, { method: 'PUT', body: { enabled: $$('input[type=checkbox]:checked', card).map((y) => y.value) } }); toast('Guardado');
+      }));
+    });
+    const g = $('#gCard');
+    const gst = (cls, html) => { const el = $('#gStatus'); el.className = `status-line ${cls}`; el.innerHTML = html; };
+    $('[data-gconnect]', g)?.addEventListener('click', async () => {
+      try {
+        await api('/api/calendar/config', { method: 'PUT', body: { google: { clientId: $('#gId').value, clientSecret: $('#gSecret').value } } });
+        const r = await api('/api/calendar/google/auth', { method: 'POST' });
+        window.open(r.url, '_blank', 'noopener');
+        gst('', `${spin('À espera da autorização no browser…')} <button class="btn" type="button" id="gDone">Já autorizei</button>`);
+        // Verifica sozinho durante uns minutos; o botão serve para quem volta antes.
+        let n = 0;
+        const poll = setInterval(async () => { if (!$('#gCard') || ++n > 90) return clearInterval(poll); const c2 = await api('/api/calendar/config').catch(() => null); if (c2?.google.connected) { clearInterval(poll); toast('Google Calendar ligado'); renderCalSettings(); } }, 2000);
+        $('#gDone').onclick = () => renderCalSettings();
+      } catch (e) { gst('err', esc(e.message)); }
+    });
+    $('[data-grefresh]', g)?.addEventListener('click', async () => { try { await api('/api/calendar/google/refresh', { method: 'POST' }); renderCalSettings(); } catch (e) { gst('err', esc(e.message)); } });
+    $('[data-goff]', g)?.addEventListener('click', async () => { await api('/api/calendar/google', { method: 'DELETE' }); renderCalSettings(); });
+    $$('.checks-col input[type=checkbox]', g).forEach((x) => (x.onchange = async () => {
+      await api('/api/calendar/config', { method: 'PUT', body: { google: { enabled: $$('.checks-col input:checked', g).map((y) => y.value) } } }); toast('Guardado');
+    }));
   }
 
   // ---------- contas ----------
@@ -1546,11 +1997,16 @@ function mount(root, host, base) {
       if ($('.ctx')) return closeCtx();
       if ($('.research')) return $('.research').remove();
       if ($('.focus')) return closeFocus();
+      if ($('.cal-ed') && !tgt.closest?.('input, textarea, select')) return state.closeEditor?.();
       if ($('#composeForm') && state.closeCompose && !tgt.closest?.('input, textarea, select')) return state.closeCompose();
     }
     if (tgt.closest?.('input, textarea, select')) { if (e.key === 'Escape') { tgt.blur(); host.focus({ preventScroll: true }); } return; } // o foco fica na app, para o Esc seguinte e os atalhos funcionarem
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const k = e.key;
+    if (state.view === 'calendar' && !$('.cal-ed')) {
+      const cal = { t: 'today', n: 'new', ArrowLeft: 'prev', ArrowRight: 'next' }[k];
+      if (cal) { e.preventDefault(); $(`.cal [data-c="${cal}"]`)?.click(); return; }
+    }
     if (k === '/') { e.preventDefault(); (state.mode === 'topics' ? $('#topicSearch') : $('#search'))?.focus(); return; }
     // preventDefault: sem ele, a tecla chega ao campo que acabou de receber o foco (o «c» aparecia no Para).
     if (k === 'c') { e.preventDefault(); return compose(); }

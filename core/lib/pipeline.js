@@ -32,7 +32,7 @@ const domainOf = (e = '') => e.split('@')[1]?.toLowerCase() || '';
 // Frente monco (desde a 0.8): o Explora3D como porta de entrada para apresentação, formação e consultoria.
 const MONCO_AUDIENCE = 'Agrupamentos de escolas públicas do Grande Porto (direção; coordenação TIC / Laboratórios de Educação Digital) e centros de formação de professores (CFAE)';
 const MONCO_BRIEF = [
-  'Sou o David Ferreira Marques, da monco.io (Porto). Desenvolvi o Explora3D, uma suite gratuita, no navegador, para introduzir a modelação e a impressão 3D a alunos dos 8 aos 14 anos: quatro ferramentas (Area, Volume, Revolve e Voxel) e uma sala de aula integrada, em que o professor lança um desafio por código e acompanha as entregas da turma. Funciona com ou sem impressora e exporta ficheiros STL para as impressoras que as escolas já têm, incluindo as dos Laboratórios de Educação Digital.',
+  'Sou o David Ferreira Marques, da monco.io (Porto). Desenvolvi o Explora3D, uma suite gratuita, no navegador, para introduzir a modelação e a impressão 3D a alunos do 1.º ao 3.º ciclo: quatro ferramentas (Area, Volume, Revolve e Voxel) e uma sala de aula integrada, em que o professor lança um desafio por código e acompanha as entregas da turma. Funciona com ou sem impressora e exporta ficheiros STL para as impressoras que as escolas já têm, incluindo as dos Laboratórios de Educação Digital.',
   'Para um agrupamento: proponho uma apresentação de 30 a 45 minutos à equipa docente (presencial ou online), com uma primeira aula preparada em conjunto; depois, se fizer sentido, formação e acompanhamento da implementação.',
   'Para um CFAE: proponho uma ação de curta duração para professores do 1.º ao 3.º ciclo («Do laboratório digital à sala de aula: primeira aula de 3D»), em formato de 3 ou 6 horas.',
   'Credenciais: mais de 15 anos a ensinar design na ESAD; antigo coordenador do Centro de Inovação Carlos Fiolhais.',
@@ -44,6 +44,8 @@ const MONCO_MATERIALS = 'Vídeo de 2 minutos: https://explora3d.monco.io/#video 
 // Atualiza a frente monco guardada enquanto ainda tiver o texto de origem (com [marcadores]); nunca toca em textos editados.
 function upgradeStreams(streams) {
   const m = streams?.find((x) => x.id === 'monco');
+  // Desde a 0.9: o Explora3D é para o 1.º ao 3.º ciclo (já não «8 aos 14 anos»), como nos sites.
+  if (m?.brief) m.brief = m.brief.replace(/dos 8 aos 14 anos/g, 'do 1.º ao 3.º ciclo');
   if (m && /\[Descrever em 2 frases/.test(m.brief || '')) {
     m.name = 'monco · Explora3D (agrupamentos e CFAE)'; m.audience = MONCO_AUDIENCE; m.brief = MONCO_BRIEF;
     if (!m.materials || /^\[link/.test(m.materials)) m.materials = MONCO_MATERIALS;

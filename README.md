@@ -80,11 +80,26 @@ A conta lê o Gmail por IMAP e filtra pelo destinatário (`"filterTo": "monco.io
 
 Com o Gmail, usa `appendSent: false`. Noutros fornecedores (cPanel, Zoho, Migadu…) usa os dados IMAP/SMTP deles e `appendSent: true`.
 
+## Calendário e projetos
+
+Em **Agenda → Calendário**: vistas de dia, 3 dias, semana (com fim de semana) e mês, e por baixo uma linha do tempo de projetos com milestones (◆) e deadlines (⚑).
+
+Fontes (ligam-se em **Definições → Calendários**):
+
+- **mailroom**: eventos e projetos guardados só neste computador (`data/events.json`, `data/projects.json`).
+- **CalDAV** (ex.: Spacemail, `https://caldav.spacemail.com/`): usa a palavra-passe da conta de correio.
+- **Google Calendar**: pela API, com uma autorização OAuth própria (o Google já não aceita palavras-passe em CalDAV). Cria um cliente OAuth do tipo *App para computador* na Google Cloud, ativa a Calendar API e publica o ecrã de consentimento (em teste, a ligação expira ao fim de 7 dias). O regresso da autorização é em `/oauth/google`.
+- **Funil**: pitches enviados, respostas e follow-ups, só de leitura.
+
+Os eventos podem ser criados e editados em qualquer calendário com escrita, e a partir de um e-mail («Criar evento»). Um evento marcado como milestone ou deadline, e ligado a um projeto, aparece na linha do tempo. Noutros calendários, o tipo fica em `CATEGORIES` (CalDAV) ou nas propriedades privadas do evento (Google). Numa série recorrente do CalDAV, as horas mudam-se no calendário de origem.
+
+Atalhos no calendário: `t` hoje, `n` novo evento, `←` `→` período anterior ou seguinte, `Esc` fecha o editor.
+
 ## Privacidade
 
 - Por omissão a app escuta só em `127.0.0.1`. Alojada na internet, só arranca com `APP_PASSWORD` definida.
 - Os e-mails não ficam guardados: a cache é de 60 s, em memória, e os resumos dos tópicos também ficam só em memória.
-- No disco ficam apenas `data/drafts.json` e `data/settings.json`.
+- No disco ficam os rascunhos, as definições, o funil e o calendário local (`data/*.json`); com o Google ligado, também a autorização (em `data/calendar.json`).
 - O texto que a IA resume é enviado ao fornecedor que escolheste. Com o Ollama, fica tudo no teu computador.
 - O HTML dos e-mails abre numa iframe sandbox, sem scripts e sem imagens remotas.
 

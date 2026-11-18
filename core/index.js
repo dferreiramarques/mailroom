@@ -19,6 +19,7 @@ import { PRESETS, listModels } from './lib/providers.js';
 import { buildTopics } from './lib/threads.js';
 import { memoryStore, fileStore } from './lib/stores.js';
 import { createPipeline } from './lib/pipeline.js';
+import { createCalendar } from './lib/calendar.js';
 
 export { memoryStore, fileStore, PRESETS };
 
@@ -437,6 +438,34 @@ export function createMailModule(opts = {}) {
   router.post('/api/pipeline/plan', h((req) => pipeline.planWeek(req.body.stream, req.body.count)));
   router.post('/api/pipeline/followups', h((req) => pipeline.prepareFollowups(req.body.stream)));
 
+  // ---------- calendário e projetos ----------
+  const calendar = createCalendar({ store, accs, isDemo, funnel: () => pipeline.read() });
+  // O Google volta a este endereço depois de autorizar; fora do router porque o browser externo não leva o token da app.
+  const googleRedirect = (req) => `${req.protocol}://${req.get('host')}/oauth/google`;
+  router.get('/api/calendar/events', h((req) => calendar.events(req.query.from, req.query.to)));
+  router.post('/api/calendar/events', h((req) => calendar.create(req.body || {})));
+  router.put('/api/calendar/events/:id', h((req) => calendar.update(req.params.id, req.body || {})));
+  router.delete('/api/calendar/events/:id', h((req) => calendar.remove(req.params.id)));
+  router.get('/api/calendar/config', h((req) => calendar.publicConfig(googleRedirect(req))));
+  router.put('/api/calendar/config', h((req) => calendar.setConfig(req.body || {})));
+  router.post('/api/calendar/caldav/:account', h((req) => calendar.connectCaldav(req.params.account, req.body?.url)));
+  router.put('/api/calendar/caldav/:account', h((req) => calendar.setCaldavEnabled(req.params.account, Array.isArray(req.body?.enabled) ? req.body.enabled : [])));
+  router.delete('/api/calendar/caldav/:account', h((req) => calendar.disconnectCaldav(req.params.account)));
+  router.post('/api/calendar/google/auth', h((req) => calendar.googleAuthUrl(googleRedirect(req))));
+  router.post('/api/calendar/google/refresh', h(() => calendar.googleRefreshCalendars()));
+  router.delete('/api/calendar/google', h(() => calendar.disconnectGoogle()));
+  router.get('/api/projects', h(() => calendar.projects.list()));
+  router.post('/api/projects', h((req) => calendar.projects.create(req.body || {})));
+  router.put('/api/projects/:id', h((req) => calendar.projects.update(req.params.id, req.body || {})));
+  router.delete('/api/projects/:id', h((req) => calendar.projects.remove(req.params.id)));
+  const googleCallback = async (req, res) => {
+    const page = (title, text) => `<!doctype html><meta charset="utf-8"><title>mailroom</title><body style="font:16px system-ui;padding:48px;max-width:520px;margin:auto;color:#1d1c1a"><h1 style="font-size:22px">${title}</h1><p>${text}</p></body>`;
+    try {
+      const r = await calendar.googleCallback(req.query);
+      res.type('html').send(page('Google Calendar ligado', `${r.email ? `Conta ${r.email}, ` : ''}${r.calendars} calendário(s). Podes fechar esta janela e voltar ao mailroom.`));
+    } catch (e) { res.status(400).type('html').send(page('Não foi possível ligar', String(e.message).replace(/[<>&]/g, ''))); }
+  };
+
   // ---------- atualizações (fornecidas pela app anfitriã) ----------
   router.get('/api/update', h(async (req) => (opts.update ? opts.update.check(Boolean(req.query.fresh)) : { available: false })));
   router.get('/api/update/progress', h(() => (opts.update?.progress ? opts.update.progress() : null) || {}));
@@ -445,5 +474,5 @@ export function createMailModule(opts = {}) {
     return opts.update.apply();
   }));
 
-  return { router, ai, get accounts() { return accs(); }, isDemo, store };
+  return { router, googleCallback, ai, get accounts() { return accs(); }, isDemo, store };
 }
