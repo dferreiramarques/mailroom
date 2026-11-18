@@ -27,7 +27,7 @@ button { cursor: pointer; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .muted { color: var(--muted); }
 
-.app { position: relative; display: grid; grid-template-columns: 196px 360px 1fr; height: 100%; background: var(--bg); color: var(--ink); }
+.app { --rail-w: 212px; --list-w: 360px; position: relative; display: grid; grid-template-columns: var(--rail-w) var(--list-w) 1fr; transition: grid-template-columns .18s ease; height: 100%; background: var(--bg); color: var(--ink); }
 
 /* rail */
 .rail { position: relative; z-index: 3; background: var(--bg); box-shadow: 1px 0 0 rgb(0 0 0 / 0.02), 6px 0 24px -12px rgb(30 25 15 / 0.18); padding: 18px 10px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
@@ -143,18 +143,14 @@ kbd.key { display: inline-grid; place-items: center; min-width: 22px; height: 22
 .toast { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: var(--radius); font-size: 14px; z-index: 10; }
 
 @container (max-width: 1000px) {
-  .app { grid-template-columns: 64px 300px 1fr; }
-  .rail .group-label, .brand { display: none; }
-  .nav { font-size: 0; justify-content: center; }
-  .nav .dot { width: 10px; height: 10px; }
-  .nav::before { content: attr(data-short); font-size: 12px; }
+  .app { --list-w: 300px; }
 }
 @container (max-width: 720px) {
   .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .rail { flex-direction: row; overflow-x: auto; padding: 8px; box-shadow: 0 6px 20px -12px rgb(30 25 15 / 0.2); }
   .group, #accountNav { display: flex; flex-direction: row; align-items: center; }
   .nav { font-size: 14px; white-space: nowrap; width: auto; }
-  .nav::before { content: none; }
+  .rail .group-label, .brand, .rail-toggle, .rail .mode { display: none; }
   .rail-foot { margin: 0; }
   .list, .reader { grid-row: 2; grid-column: 1; min-height: 0; }
   .app.reading .list, .app:not(.reading) .reader { display: none; }
@@ -166,7 +162,7 @@ kbd.key { display: inline-grid; place-items: center; min-width: 22px; height: 22
 .switch { display: flex; background: var(--soft); border-radius: 8px; padding: 3px; margin: 0 4px; }
 .switch button { flex: 1; border: 0; background: none; border-radius: 6px; padding: 5px 0; font-size: 13px; color: var(--muted); }
 .switch button.on { background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); }
-.app[data-mode=topics] { grid-template-columns: 196px 1fr; }
+.app[data-mode=topics] { grid-template-columns: var(--rail-w) 1fr; }
 .app[data-mode=topics] .list { display: none; }
 
 /* ---------- tópicos ---------- */
@@ -244,8 +240,6 @@ kbd.key { display: inline-grid; place-items: center; min-width: 22px; height: 22
 .toggle { display: flex; gap: 8px; align-items: center; font-size: 14px; margin-bottom: 8px; }
 
 @container (max-width: 1000px) {
-  .app[data-mode=topics] { grid-template-columns: 64px 1fr; }
-  .switch { flex-direction: column; }
 }
 @container (max-width: 720px) {
   .app[data-mode=topics] { grid-template-columns: 1fr; }
@@ -338,7 +332,7 @@ details.card[open] summary::before { content: '▾ '; }
 .compose-head .close { margin-top: -2px; font-size: 24px; }
 
 /* ===================== calendário ===================== */
-.app[data-wide] { grid-template-columns: 196px 1fr; }
+.app[data-wide] { grid-template-columns: var(--rail-w) 1fr; }
 .app[data-wide] .list { display: none; }
 .app[data-wide] .reader { display: block; }
 .cal { padding: 18px 24px 60px; max-width: 1500px; margin: 0 auto; }
@@ -436,9 +430,9 @@ details.card[open] summary::before { content: '▾ '; }
 .checks-col .checks { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .steps { margin: 0 0 12px; padding-left: 20px; line-height: 1.55; font-size: 14px; }
 .steps li { margin-bottom: 4px; }
-@media (max-width: 900px) {
-  .app[data-wide] { grid-template-columns: 1fr; }
-  .app[data-wide] .rail { display: none; }
+/* janela estreita: a barra fica no topo (como nas outras vistas) e o calendário ocupa a largura */
+.app[data-rail=bar][data-wide] { grid-template-columns: 1fr; }
+@container (max-width: 900px) {
   .cal { padding: 12px; }
   .pm-row { grid-template-columns: 130px 1fr; }
 }
@@ -451,3 +445,44 @@ details.card[open] summary::before { content: '▾ '; }
 .tev.short .t::after { content: ''; }
 .tev.short .te { display: none; }
 .cal-ed input[type=color] { height: 38px; padding: 3px; cursor: pointer; }
+
+/* ===================== barra lateral: expandida e recolhida ===================== */
+.rail-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 30px; }
+.rail-toggle { margin-left: auto; flex: none; display: grid; place-items: center; width: 30px; height: 30px; border: 0; background: none; border-radius: 8px; color: var(--muted); }
+.rail-toggle:hover { background: var(--soft); color: var(--ink); }
+.rail svg { width: 16px; height: 16px; flex: none; }
+.group-label { display: flex; align-items: center; gap: 7px; }
+.group-label svg { width: 14px; height: 14px; opacity: .85; }
+.nav .ini { display: none; }
+.nav.settings svg { color: var(--muted); }
+.switch button { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.switch button svg { display: none; }
+.rail-tip { position: absolute; z-index: 30; transform: translateY(-50%); background: var(--ink); color: var(--bg); font-size: 12.5px; font-weight: 500; padding: 5px 9px; border-radius: 6px; white-space: nowrap; pointer-events: none; box-shadow: var(--shadow-2); }
+.rail-tip::before { content: ''; position: absolute; left: -4px; top: 50%; width: 8px; height: 8px; background: inherit; transform: translateY(-50%) rotate(45deg); border-radius: 1px; }
+
+.app[data-rail=collapsed] { --rail-w: 72px; }
+.app[data-rail=collapsed] .rail { padding: 14px 0 12px; align-items: center; gap: 10px; }
+.app[data-rail=collapsed] .rail-top { justify-content: center; }
+.app[data-rail=collapsed] .rail-toggle { margin: 0; }
+.app[data-rail=collapsed] .brand, .app[data-rail=collapsed] .nl, .app[data-rail=collapsed] .group-label span, .app[data-rail=collapsed] .mode { display: none; }
+/* cada secção vira um chip vertical: ícone da secção em cima, itens por baixo */
+.app[data-rail=collapsed] .switch, .app[data-rail=collapsed] .group { width: 48px; margin: 0; padding: 5px; gap: 3px; border-radius: 16px; background: var(--soft); display: flex; flex-direction: column; align-items: center; }
+.app[data-rail=collapsed] .group-items { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.app[data-rail=collapsed] .group-label { padding: 6px 0 5px; justify-content: center; color: var(--muted); border-bottom: 1px solid color-mix(in srgb, var(--muted) 22%, transparent); width: 28px; margin-bottom: 2px; }
+.app[data-rail=collapsed] .group-label svg { width: 16px; height: 16px; opacity: 1; }
+.app[data-rail=collapsed] .nav, .app[data-rail=collapsed] .switch button { position: relative; width: 38px; height: 38px; padding: 0; justify-content: center; border-radius: 11px; flex: none; }
+.app[data-rail=collapsed] .nav .ini { display: block; font-size: 13px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
+.app[data-rail=collapsed] .nav:hover, .app[data-rail=collapsed] .switch button:hover { background: color-mix(in srgb, var(--panel) 70%, transparent); }
+.app[data-rail=collapsed] .nav.active, .app[data-rail=collapsed] .switch button.on { background: var(--panel); box-shadow: var(--shadow-1); }
+.app[data-rail=collapsed] .switch button svg { display: block; }
+.app[data-rail=collapsed] .switch button.on svg { color: var(--ink); }
+.app[data-rail=collapsed] .nav .dot { position: absolute; right: 6px; bottom: 6px; width: 6px; height: 6px; margin: 0; }
+.app[data-rail=collapsed] .nav .count { position: absolute; top: 1px; right: 1px; margin: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--ink); color: var(--bg); font-size: 10px; font-weight: 600; display: grid; place-items: center; }
+.app[data-rail=collapsed] .nav .count:empty { display: none; }
+.app[data-rail=collapsed] .rail-foot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.app[data-rail=collapsed] .nav.settings svg { width: 18px; height: 18px; }
+.app[data-rail=collapsed] .nav.update { font-size: 0; color: var(--focus); }
+.app[data-rail=collapsed] .nav.update::before { content: '↓'; font-size: 17px; font-weight: 700; }
+@media (prefers-reduced-motion: reduce) { .app { transition: none; } }
+.app[data-rail=bar] .rail-toggle, .app[data-rail=bar] .group-label, .app[data-rail=bar] .brand, .app[data-rail=bar] .mode { display: none; }
+.app[data-rail=bar] .rail-top { display: none; }

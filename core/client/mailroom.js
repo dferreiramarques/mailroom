@@ -30,39 +30,56 @@ function splitQuote(t = '') {
   return m ? [t.slice(0, m.index).trimEnd(), t.slice(m.index).trim()] : [t, ''];
 }
 
+// Ícones da barra lateral (traço simples, herdam a cor do texto).
+const ico = (p) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+const ICON = {
+  inbox: ico('<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>'),
+  folder: ico('<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>'),
+  calendar: ico('<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>'),
+  target: ico('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>'),
+  sparkles: ico('<path d="M11 3l1.8 5.2L18 10l-5.2 1.8L11 17l-1.8-5.2L4 10l5.2-1.8z"/><path d="M19 14l.7 2.3L22 17l-2.3.7L19 20l-.7-2.3L16 17l2.3-.7z"/>'),
+  settings: ico('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'),
+  panel: ico('<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/>'),
+  topics: ico('<rect width="7" height="7" x="3" y="3" rx="1.5"/><rect width="7" height="7" x="14" y="3" rx="1.5"/><rect width="7" height="7" x="14" y="14" rx="1.5"/><rect width="7" height="7" x="3" y="14" rx="1.5"/>'),
+  mail: ico('<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>'),
+};
+
 const SHELL = `
 <div class="app" data-mode="topics">
   <nav class="rail" aria-label="Navegação">
-    <div class="brand">mailroom</div>
+    <div class="rail-top">
+      <div class="brand">mailroom</div>
+      <button class="rail-toggle" id="railToggle" type="button" aria-expanded="true" aria-label="Recolher a barra lateral ([)" data-tip="Recolher a barra lateral ( [ )">${ICON.panel}</button>
+    </div>
     <div class="switch" role="tablist" aria-label="Vista">
-      <button role="tab" data-mode="topics">Tópicos</button>
-      <button role="tab" data-mode="classic">Caixa</button>
+      <button role="tab" data-mode="topics" data-tip="Tópicos">${ICON.topics}<span class="nl">Tópicos</span></button>
+      <button role="tab" data-mode="classic" data-tip="Caixa">${ICON.mail}<span class="nl">Caixa</span></button>
     </div>
-    <div class="group"><div class="group-label">Caixas</div><div id="accountNav"></div></div>
+    <div class="group"><div class="group-label" data-tip="Caixas">${ICON.inbox}<span>Caixas</span></div><div id="accountNav" class="group-items"></div></div>
     <div class="group">
-      <div class="group-label">Pastas</div>
-      <button class="nav" data-folder="INBOX">Entrada</button>
-      <button class="nav" data-folder="Sent">Enviados</button>
-      <button class="nav" data-view="drafts">Rascunhos <span class="count" id="draftCount"></span></button>
-    </div>
-    <div class="group">
-      <div class="group-label">Agenda</div>
-      <button class="nav" data-view="calendar">Calendário</button>
+      <div class="group-label" data-tip="Pastas">${ICON.folder}<span>Pastas</span></div>
+      <button class="nav" data-folder="INBOX"><span class="nl">Entrada</span></button>
+      <button class="nav" data-folder="Sent"><span class="nl">Enviados</span></button>
+      <button class="nav" data-view="drafts"><span class="nl">Rascunhos</span> <span class="count" id="draftCount"></span></button>
     </div>
     <div class="group">
-      <div class="group-label">Prospeção</div>
-      <button class="nav" data-view="funnel">Funil <span class="count" id="funnelCount"></span></button>
+      <div class="group-label" data-tip="Agenda">${ICON.calendar}<span>Agenda</span></div>
+      <button class="nav" data-view="calendar"><span class="nl">Calendário</span></button>
     </div>
     <div class="group">
-      <div class="group-label">Assistente</div>
-      <button class="nav" data-view="triage">Triagem</button>
-      <button class="nav" data-view="pitch">Pitch</button>
-      <button class="nav" data-view="publish">Publicação</button>
-      <button class="nav" data-view="agent">Agente</button>
+      <div class="group-label" data-tip="Prospeção">${ICON.target}<span>Prospeção</span></div>
+      <button class="nav" data-view="funnel"><span class="nl">Funil</span> <span class="count" id="funnelCount"></span></button>
+    </div>
+    <div class="group">
+      <div class="group-label" data-tip="Assistente">${ICON.sparkles}<span>Assistente</span></div>
+      <button class="nav" data-view="triage"><span class="nl">Triagem</span></button>
+      <button class="nav" data-view="pitch"><span class="nl">Pitch</span></button>
+      <button class="nav" data-view="publish"><span class="nl">Publicação</span></button>
+      <button class="nav" data-view="agent"><span class="nl">Agente</span></button>
     </div>
     <div class="rail-foot">
       <button class="nav update" id="updateBtn" hidden></button>
-      <button class="nav" data-view="settings">Definições</button>
+      <button class="nav settings" data-view="settings" data-tip="Definições">${ICON.settings}<span class="nl">Definições</span></button>
       <div id="modeBadge" class="mode"></div>
     </div>
   </nav>
@@ -161,13 +178,74 @@ function mount(root, host, base) {
   function renderNav() {
     const s = state.status;
     $('#accountNav').innerHTML = [
-      `<button class="nav" data-account="all" data-short="Tudo"><span class="dot" style="background:var(--muted)"></span>Tudo</button>`,
-      ...s.accounts.map((a) => `<button class="nav" data-account="${esc(a.id)}" data-short="${esc(a.label.slice(0, 4))}"><span class="dot" style="background:${esc(a.color || '#999')}"></span>${esc(a.label)}</button>`),
+      `<button class="nav" data-account="all"><span class="dot" style="background:var(--muted)"></span><span class="nl">Tudo</span></button>`,
+      ...s.accounts.map((a) => `<button class="nav" data-account="${esc(a.id)}"><span class="dot" style="background:${esc(a.color || '#999')}"></span><span class="nl">${esc(a.label)}</span></button>`),
     ].join('');
-    $$('.nav').forEach((b) => (b.dataset.short ??= b.textContent.trim().slice(0, 4)));
+    initials();
     renderBadge();
     highlightNav();
   }
+  // Barra recolhida: cada item mostra a primeira letra (duas, se houver outra igual no mesmo grupo).
+  function initials() {
+    for (const g of $$('.rail .group')) {
+      const items = $$('.nav', g).filter((b) => $('.nl', b));
+      const first = (b) => $('.nl', b).textContent.trim().replace(/^[^\p{L}\p{N}]+/u, '');
+      const counts = {};
+      for (const b of items) { const k = first(b).charAt(0).toUpperCase(); counts[k] = (counts[k] || 0) + 1; }
+      const used = new Set();
+      for (const b of items) {
+        const name = first(b), k = name.charAt(0).toUpperCase();
+        // Repetida no grupo: junta a primeira letra seguinte que ainda não foi usada (Entrada «En», Enviados «Ev»).
+        let label = k;
+        if (counts[k] > 1) for (const ch of name.slice(1).toLowerCase().match(/[\p{L}\p{N}]/gu) || []) { if (!used.has(k + ch)) { label = k + ch; break; } }
+        used.add(label);
+        let ini = $('.ini', b);
+        if (!ini) { ini = document.createElement('span'); ini.className = 'ini'; ini.setAttribute('aria-hidden', 'true'); b.prepend(ini); }
+        ini.textContent = label;
+        b.dataset.tip = $('.nl', b).textContent.trim();
+      }
+    }
+  }
+  // Estado da barra: escolhido pelo utilizador; sem escolha, recolhe sozinha em janelas estreitas.
+  function applyRail() {
+    const w = host.getBoundingClientRect().width;
+    const pref = ls.get('mailroom.rail');
+    const mode = w <= 720 ? 'bar' : pref || (w < 1000 ? 'collapsed' : 'expanded');
+    app().dataset.rail = mode;
+    const t = $('#railToggle'), open = mode !== 'collapsed';
+    t.setAttribute('aria-expanded', String(open));
+    t.setAttribute('aria-label', open ? 'Recolher a barra lateral ([)' : 'Expandir a barra lateral ([)');
+    t.dataset.tip = open ? 'Recolher a barra lateral ( [ )' : 'Expandir a barra lateral ( [ )';
+    hideTip();
+  }
+  function toggleRail() {
+    ls.set('mailroom.rail', app().dataset.rail === 'collapsed' ? 'expanded' : 'collapsed');
+    applyRail();
+  }
+  $('#railToggle').onclick = toggleRail;
+  new ResizeObserver(() => applyRail()).observe(host);
+  // Dicas da barra recolhida: aparecem já ao passar o rato ou com o foco do teclado (o title nativo demora e não aparece com o teclado).
+  const tip = document.createElement('div'); tip.className = 'rail-tip'; tip.setAttribute('role', 'tooltip'); tip.hidden = true;
+  function showTip(el) {
+    if (app().dataset.rail !== 'collapsed') return;
+    const text = el.dataset.tip || el.textContent.trim(); if (!text) return;
+    const count = $('.count', el)?.textContent.trim();
+    tip.textContent = count ? `${text} · ${count}` : text;
+    if (!tip.isConnected) app().append(tip);
+    const r = el.getBoundingClientRect(), a = app().getBoundingClientRect();
+    tip.hidden = false;
+    tip.style.left = `${r.right - a.left + 10}px`;
+    tip.style.top = `${r.top - a.top + r.height / 2}px`;
+  }
+  function hideTip() { tip.hidden = true; }
+  const rail = $('.rail');
+  rail.addEventListener('mouseover', (e) => { const el = e.target.closest('[data-tip], .nav'); if (el && rail.contains(el)) showTip(el); });
+  rail.addEventListener('mouseleave', hideTip);
+  rail.addEventListener('focusin', (e) => { const el = e.target.closest('[data-tip], .nav'); if (el) showTip(el); });
+  rail.addEventListener('focusout', hideTip);
+  rail.addEventListener('scroll', hideTip, { passive: true });
+  rail.addEventListener('click', hideTip);
+
   function renderBadge() {
     const s = state.status;
     $('#modeBadge').textContent = [s.version ? `v${s.version}` : null, s.demo ? 'Modo demo' : null, s.ai ? `IA: ${s.aiModel || 'ativa'}` : 'IA simulada'].filter(Boolean).join(' · ');
@@ -184,7 +262,7 @@ function mount(root, host, base) {
     app()?.toggleAttribute('data-wide', state.view === 'calendar'); // o calendário usa a largura toda
   }
   // Painel de leitura vazio: números da caixa, botão de nova mensagem e atalhos.
-  const SHORTCUTS = [['j', 'k', 'Seguinte / anterior'], ['r', 'Responder'], ['s', 'Resumir com IA'], ['g', 'Sugerir respostas'], ['c', 'Nova mensagem'], ['/', 'Pesquisar'], ['v', 'Mudar de vista'], ['Esc', 'Fechar / sair do campo']];
+  const SHORTCUTS = [['j', 'k', 'Seguinte / anterior'], ['r', 'Responder'], ['s', 'Resumir com IA'], ['g', 'Sugerir respostas'], ['c', 'Nova mensagem'], ['/', 'Pesquisar'], ['v', 'Mudar de vista'], ['[', 'Recolher / expandir a barra'], ['Esc', 'Fechar / sair do campo']];
   const kbd = (k) => `<kbd class="key">${esc(k)}</kbd>`;
   async function readerHome() {
     const reader = $('#reader');
@@ -2007,6 +2085,7 @@ function mount(root, host, base) {
       const cal = { t: 'today', n: 'new', ArrowLeft: 'prev', ArrowRight: 'next' }[k];
       if (cal) { e.preventDefault(); $(`.cal [data-c="${cal}"]`)?.click(); return; }
     }
+    if (k === '[') { e.preventDefault(); return toggleRail(); }
     if (k === '/') { e.preventDefault(); (state.mode === 'topics' ? $('#topicSearch') : $('#search'))?.focus(); return; }
     // preventDefault: sem ele, a tecla chega ao campo que acabou de receber o foco (o «c» aparecia no Para).
     if (k === 'c') { e.preventDefault(); return compose(); }
