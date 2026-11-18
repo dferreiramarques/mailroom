@@ -201,7 +201,13 @@ function mount(root, host, base) {
     } catch { if (token === readerHome.t) $('.stats', reader)?.remove(); }
   }
   // Põe o foco do teclado na lista, para j/k funcionarem logo depois de escolher a caixa.
-  function focusList() { const ul = $('#messageList'); ul.tabIndex = -1; ul.focus({ preventScroll: true }); }
+  // Só mexe no foco se ninguém estiver a escrever: a lista pode chegar segundos depois (IMAP lento, correio novo)
+  // e não pode tirar o cursor do «Para» de uma mensagem que entretanto se abriu.
+  function busyTyping() {
+    const el = root.activeElement;
+    return !!(el && (el.closest('input, textarea, select, [contenteditable="true"]') || el.closest('.focus, .ctx, .research, .modal'))) || !!$('#composeForm');
+  }
+  function focusList() { if (busyTyping()) return; const ul = $('#messageList'); ul.tabIndex = -1; ul.focus({ preventScroll: true }); }
 
   function setMode(mode) {
     state.mode = mode;

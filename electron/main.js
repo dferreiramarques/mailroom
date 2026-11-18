@@ -131,7 +131,8 @@ async function pollMail() {
         body: fresh.length === 1 ? first.subject : fresh.slice(0, 3).map((m) => m.subject).join('\n'),
         icon: path.join(__dirname, 'icon.png'),
       });
-      n.on('click', () => { showWindow(); win?.webContents.reload(); });
+      // Atualiza só a lista: recarregar a página apagava uma mensagem a meio de ser escrita.
+      n.on('click', () => { showWindow(); win?.webContents.executeJavaScript("document.querySelector('mail-room')?.refresh()").catch(() => {}); });
       n.show();
     }
     seeded = true;
