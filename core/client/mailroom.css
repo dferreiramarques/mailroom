@@ -315,6 +315,7 @@ a.btn { text-decoration: none; color: inherit; display: inline-block; }
 .pill.st-respondeu, .pill.st-conversa { border-color: var(--focus); color: var(--focus); }
 .pill.st-concluido { border-color: #2f7a4f; color: #2f7a4f; }
 .pill.st-recusou, .pill.st-sem_resposta { color: var(--muted); }
+.pill.st-devolvido { border-color: var(--warn); color: var(--warn); }
 .late { color: var(--warn); font-weight: 600; }
 .card.attn { box-shadow: var(--shadow-2); }
 details.card summary { cursor: pointer; list-style: none; }
@@ -491,3 +492,24 @@ details.card[open] summary::before { content: '▾ '; }
 .card.flash { animation: flash 1.4s ease-out; }
 @keyframes flash { from { box-shadow: 0 0 0 2px var(--focus), var(--shadow-1); } to { box-shadow: 0 0 0 2px transparent, var(--shadow-1); } }
 @media (prefers-reduced-motion: reduce) { .card.flash { animation: none; } }
+
+/* caixa de saída */
+.ob-row { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.ob-main { display: flex; flex-direction: column; min-width: 0; font-size: 14px; }
+.ob-main > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ob-err { color: var(--warn); font-size: 13px; white-space: normal !important; }
+.ob-when { font-size: 13px; }
+.ob-act { display: flex; gap: 6px; }
+.pill.st-sent { border-color: #2f7a4f; color: #2f7a4f; }
+.pill.st-failed { border-color: var(--warn); color: var(--warn); }
+.pill.st-sending, .pill.st-queued, .pill.st-unknown { border-color: var(--focus); color: var(--focus); }
+.pill.st-cancelled { color: var(--muted); }
+.mini { width: 64px; border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); padding: 3px 6px; }
+.sendst { font-size: 12.5px; color: var(--focus); }
+.sendst.ok { color: #2f7a4f; }
+.sendst.err { color: var(--warn); }
+.sendst .btn { padding: 2px 8px; font-size: 12px; margin-left: 4px; }
+.card.rv.sent { opacity: .6; }
+.tag.warn { border-color: var(--warn); color: var(--warn); }
+.nav.busy .count { color: var(--focus); font-weight: 700; }
+@container (max-width: 720px) { .ob-row { grid-template-columns: 1fr auto; } .ob-when { display: none; } }

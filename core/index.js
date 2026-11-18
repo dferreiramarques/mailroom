@@ -20,6 +20,7 @@ import { buildTopics } from './lib/threads.js';
 import { memoryStore, fileStore } from './lib/stores.js';
 import { createPipeline } from './lib/pipeline.js';
 import { createCalendar } from './lib/calendar.js';
+import { createOutbox } from './lib/outbox.js';
 
 export { memoryStore, fileStore, PRESETS };
 
@@ -154,18 +155,19 @@ export function createMailModule(opts = {}) {
     return { ok: true };
   }));
 
-  router.post('/api/send', h(async (req) => {
-    const { account, to, cc, bcc, subject, text, inReplyTo, references, draftId, attachments } = req.body;
+  // Envia uma mensagem (imediata ou da caixa de saída): tira o rascunho e avisa o funil.
+  async function deliver({ account, to, cc, bcc, subject, text, inReplyTo, references, draftId, attachments, messageId }) {
     if (!to || !subject) throw Object.assign(new Error('Falta destinatário ou assunto'), { status: 400 });
     const acc = accById(account);
     const draft = draftId ? (await store.getDrafts()).find((x) => x.id === draftId) : null;
     const files = (attachments || draft?.attachments || []).map((a) => ({ filename: a.filename, contentType: a.contentType, content: Buffer.from(a.data || '', 'base64') }));
-    const r = await io.send(acc, { to, cc, bcc, subject, text, inReplyTo, references, attachments: files.length ? files : undefined });
+    const r = await io.send(acc, { to, cc, bcc, subject, text, inReplyTo, references, messageId, attachments: files.length ? files : undefined });
     if (draftId) await editDrafts((d) => ({ drafts: d.filter((x) => x.id !== draftId) }));
     if (draft?.contactId) await pipeline.onSent({ ...draft, subject, text }, r.messageId).catch((e) => console.error('[funil]', e.message));
     opts.onSend?.(acc, { to, subject });
     return { ok: true, ...r };
-  }));
+  }
+  router.post('/api/send', h((req) => deliver(req.body || {})));
 
   // ---------- tópicos ----------
   router.get('/api/topics', h(async (req) => {
@@ -438,6 +440,21 @@ export function createMailModule(opts = {}) {
   router.post('/api/pipeline/plan', h((req) => pipeline.planWeek(req.body.stream, req.body.count)));
   router.post('/api/pipeline/followups', h((req) => pipeline.prepareFollowups(req.body.stream)));
 
+  // ---------- caixa de saída ----------
+  const outbox = createOutbox({ store, editDrafts, accById, deliver, isDemo, prefs: async () => (await rawSettings()).prefs || {},
+    findSent: (acc, id) => mail.findSent(acc, id) });
+  router.get('/api/outbox', h(() => outbox.status()));
+  router.post('/api/outbox', h((req) => outbox.enqueue(Array.isArray(req.body?.drafts) ? req.body.drafts.map(String).slice(0, 200) : [], { spaced: req.body?.spaced })));
+  router.post('/api/outbox/:id/retry', h((req) => outbox.retry(req.params.id)));
+  router.delete('/api/outbox/:id', h((req) => outbox.cancel(req.params.id)));
+  router.put('/api/outbox/spacing', h(async (req) => {
+    const b = req.body || {};
+    const s = await rawSettings();
+    const min = Math.max(5, Math.min(600, Number(b.min) || 20)), max = Math.max(min, Math.min(900, Number(b.max) || 60));
+    await store.setSettings({ ...s, prefs: { ...(s.prefs || {}), outboxSpacing: { on: b.on !== false, min, max } } });
+    return outbox.status();
+  }));
+
   // ---------- calendário e projetos ----------
   const calendar = createCalendar({ store, accs, isDemo, funnel: () => pipeline.read() });
   // O Google volta a este endereço depois de autorizar; fora do router porque o browser externo não leva o token da app.
@@ -471,6 +488,8 @@ export function createMailModule(opts = {}) {
   router.get('/api/update/progress', h(() => (opts.update?.progress ? opts.update.progress() : null) || {}));
   router.post('/api/update/apply', h(async () => {
     if (!opts.update) throw Object.assign(new Error('Sem atualizador'), { status: 404 });
+    // A atualização reinicia a app: espera que a caixa de saída fique vazia.
+    if (await outbox.busy()) throw Object.assign(new Error('Há e-mails a sair da caixa de saída. Atualiza quando o envio terminar.'), { status: 409 });
     return opts.update.apply();
   }));
 

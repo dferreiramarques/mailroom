@@ -174,16 +174,44 @@ export async function setFlag(acc, uid, folder, flag, on) {
   invalidateAccount(acc);
 }
 
-export async function sendMail(acc, { to, cc, bcc, subject, text, inReplyTo, references, attachments }) {
-  const transport = nodemailer.createTransport({
-    host: acc.smtp.host,
-    port: acc.smtp.port ?? 465,
-    secure: acc.smtp.secure ?? (acc.smtp.port ?? 465) === 465,
-    auth: { user: acc.smtp.user, pass: acc.smtp.pass },
+// Uma ligação SMTP por conta, reaproveitada entre envios seguidos (a caixa de saída manda vários de seguida).
+const transports = new Map(); // conta -> { t, key, timer }
+function transportFor(acc) {
+  const key = `${acc.smtp.host}|${acc.smtp.port}|${acc.smtp.user}|${acc.smtp.pass}`;
+  let e = transports.get(ck(acc));
+  if (e && e.key !== key) { e.t.close(); transports.delete(ck(acc)); e = null; }
+  if (!e) {
+    e = { key, t: nodemailer.createTransport({
+      pool: true, maxConnections: 1, maxMessages: 50,
+      host: acc.smtp.host, port: acc.smtp.port ?? 465,
+      secure: acc.smtp.secure ?? (acc.smtp.port ?? 465) === 465,
+      auth: { user: acc.smtp.user, pass: acc.smtp.pass },
+      connectionTimeout: 20000, greetingTimeout: 15000, socketTimeout: 60000,
+    }) };
+    transports.set(ck(acc), e);
+  }
+  clearTimeout(e.timer);
+  e.timer = setTimeout(() => { e.t.close(); if (transports.get(ck(acc)) === e) transports.delete(ck(acc)); }, 90_000);
+  e.timer.unref?.();
+  return e.t;
+}
+
+/** Já existe nos Enviados uma mensagem com este Message-ID? (para não repetir um envio interrompido) */
+export async function findSent(acc, messageId) {
+  return withClient(acc, async (client) => {
+    const path = await resolveFolder(client, acc, 'Sent');
+    const lock = await client.getMailboxLock(path);
+    try { return (await client.search({ header: { 'message-id': messageId } }, { uid: true })).length > 0; }
+    finally { lock.release(); }
   });
+}
+
+export async function sendMail(acc, { to, cc, bcc, subject, text, inReplyTo, references, attachments, messageId }) {
+  const transport = transportFor(acc);
   const mail = {
     from: acc.fromName ? `"${acc.fromName}" <${acc.address}>` : acc.address,
     to, cc, bcc, subject, text, attachments,
+    ...(messageId ? { messageId } : {}),
     inReplyTo: inReplyTo || undefined,
     references: references?.length ? references : inReplyTo ? [inReplyTo] : undefined,
   };

@@ -61,6 +61,7 @@ const SHELL = `
       <button class="nav" data-folder="INBOX"><span class="nl">Entrada</span></button>
       <button class="nav" data-folder="Sent"><span class="nl">Enviados</span></button>
       <button class="nav" data-view="drafts"><span class="nl">Rascunhos</span> <span class="count" id="draftCount"></span></button>
+      <button class="nav" data-view="outbox"><span class="nl">Caixa de saída</span> <span class="count" id="outboxCount"></span></button>
     </div>
     <div class="group">
       <div class="group-label" data-tip="Agenda">${ICON.calendar}<span>Agenda</span></div>
@@ -413,8 +414,11 @@ function mount(root, host, base) {
 
   // ---------- caixa de resposta (cartão e modo focado) ----------
   const lastIncoming = (th) => [...th.messages].reverse().find((m) => m.folder !== 'Sent') || th.messages.at(-1);
+  // Avisos de devolução e outros remetentes automáticos: não se responde a um robô.
+  const isAutomated = (m) => (m?.from || []).some((f) => /mailer-daemon|postmaster|no-?reply|mail delivery/i.test(`${f.address} ${f.name || ''}`));
   function replyBox(th, key) {
     const target = lastIncoming(th);
+    if (isAutomated(target) && th.messages.at(-1).folder !== 'Sent') return `<div class="replybox auto"><p class="hint" style="margin:0">Mensagem automática (${esc(target.from?.[0]?.address || '')}): ninguém lê as respostas a este endereço. Se for um aviso de devolução, o funil marca o contacto como «Devolvido» e mostra o motivo.</p></div>`;
     const mineLast = th.messages.at(-1).folder === 'Sent';
     const to = (target.replyTo?.length ? target.replyTo : target.from).map((a) => a.address).join(', ');
     return `<div class="replybox" data-key="${esc(key)}">
@@ -433,7 +437,7 @@ function mount(root, host, base) {
   }
 
   function wireReplyBox(scope, th) {
-    const box = $('.replybox', scope); if (!box) return;
+    const box = $('.replybox', scope); if (!box || box.classList.contains('auto')) return;
     const ta = $('.rb-text', box), tabs = $('.rb-tabs', box);
     const target = lastIncoming(th);
     const mineLast = th.messages.at(-1).folder === 'Sent';
@@ -933,6 +937,81 @@ function mount(root, host, base) {
     if (d.to && d.text && !d.draftId) $('#cText').setSelectionRange(0, 0);
   }
 
+  // ---------- caixa de saída ----------
+  // O envio em lote corre no servidor do mailroom, com a fila guardada em disco: mudar de ecrã ou fechar a app não perde nada.
+  const JOB_LABEL = { queued: 'na fila', sending: 'a enviar…', sent: 'enviado', failed: 'falhou', cancelled: 'cancelado', unknown: 'a confirmar' };
+  const hm = (iso) => new Date(iso).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+  let outboxTimer = null, lastPending = 0, batchStart = null;
+  async function pollOutbox(now) {
+    clearTimeout(outboxTimer);
+    let o;
+    try { o = await api('/api/outbox'); } catch { outboxTimer = setTimeout(pollOutbox, 30000); return; }
+    state.outbox = o;
+    const c = $('#outboxCount'); if (c) c.textContent = o.pending || (o.failed ? '!' : '');
+    $('.nav[data-view="outbox"]')?.classList.toggle('busy', o.pending > 0);
+    if (o.pending && !lastPending) batchStart = Date.now();
+    // Acabou um lote: resumo e atualiza rascunhos e funil.
+    if (lastPending && !o.pending) {
+      const done = o.jobs.filter((j) => new Date(j.sentAt || j.createdAt) >= new Date(batchStart || 0));
+      const sent = done.filter((j) => j.status === 'sent').length, failed = done.filter((j) => j.status === 'failed').length;
+      toast(failed ? `Envio terminado: ${sent} enviado(s), ${failed} falharam. Vê a caixa de saída.` : `Envio terminado: ${sent} e-mail(s) enviados.`);
+      await refreshDrafts(); refreshFunnelCount();
+    } else if (o.pending !== lastPending) await refreshDrafts();
+    lastPending = o.pending;
+    paintSendStates();
+    if (state.view === 'outbox' && $('#outboxPane')) renderOutbox();
+    outboxTimer = setTimeout(pollOutbox, o.pending ? 2500 : 30000);
+  }
+  // Estado de envio em cada cartão de rascunho visível (revisão do funil).
+  function paintSendStates() {
+    const o = state.outbox; if (!o) return;
+    for (const el of $$('[data-did]')) {
+      const st = $('[data-sendst]', el); if (!st) continue;
+      const d = state.drafts.find((x) => x.id === el.dataset.did);
+      const j = o.jobs.find((x) => x.draftId === el.dataset.did && x.status !== 'cancelled');
+      if (!d && j?.status === 'sent') { el.classList.add('sent'); st.className = 'sendst ok'; st.textContent = `· enviado às ${hm(j.sentAt)}`; $$('button, input', el).forEach((x) => (x.disabled = true)); continue; }
+      if (d?.sendError) { st.className = 'sendst err'; st.innerHTML = `· falhou: ${esc(d.sendError)} ${j ? `<button class="btn" data-rv="retry" data-job="${esc(j.id)}">Tentar de novo</button>` : ''}`; continue; }
+      if (j && ['queued', 'sending', 'unknown'].includes(j.status)) { st.className = 'sendst'; st.textContent = `· ${JOB_LABEL[j.status]}${j.status === 'queued' && j.eta ? ` (sai ~${hm(j.eta)})` : ''}`; continue; }
+      st.textContent = ''; st.className = 'sendst';
+    }
+    const log = $('#rvLog');
+    if (log) {
+      if (o.pending) { log.hidden = false; log.innerHTML = `${spin(`A enviar: ${o.pending} por sair${o.until ? `, os últimos por volta das ${hm(o.until)}` : ''}.`)} <span class="muted">Podes continuar a trabalhar; se fechares a app, o envio continua quando a voltares a abrir.</span>`; }
+      else log.hidden = true;
+    }
+  }
+  function viewOutbox() {
+    $('#reader').innerHTML = `<div class="pane" id="outboxPane">${backBtn()}<h1>Caixa de saída</h1><div id="obBody">${spin('A carregar…')}</div></div>`;
+    pollOutbox(true);
+  }
+  function renderOutbox() {
+    const o = state.outbox, box = $('#obBody'); if (!o || !box) return;
+    const row = (j) => `<div class="ob-row st-${esc(j.status)}">
+      <span class="pill st-${esc(j.status)}">${JOB_LABEL[j.status] || j.status}</span>
+      <span class="ob-main"><b>${esc(j.to)}</b><span class="muted">${esc(j.subject)}</span>${j.error ? `<span class="ob-err">${esc(j.error)}</span>` : ''}${j.note ? `<span class="muted">${esc(j.note)}</span>` : ''}</span>
+      <span class="ob-when muted">${j.status === 'sent' ? `${new Date(j.sentAt).toLocaleDateString('pt-PT', { day: 'numeric', month: 'short' })} ${hm(j.sentAt)}` : j.status === 'queued' && j.eta ? `~${hm(j.eta)}` : ''}</span>
+      <span class="ob-act">${j.status === 'failed' ? `<button class="btn" data-ob="retry" data-id="${esc(j.id)}">Tentar de novo</button>` : ''}${['queued', 'failed'].includes(j.status) ? `<button class="btn" data-ob="cancel" data-id="${esc(j.id)}">Cancelar</button>` : ''}</span>
+    </div>`;
+    const pend = o.jobs.filter((j) => ['queued', 'sending', 'unknown'].includes(j.status));
+    const failed = o.jobs.filter((j) => j.status === 'failed');
+    const done = o.jobs.filter((j) => ['sent', 'cancelled'].includes(j.status)).slice(0, 60);
+    box.innerHTML = `
+      <div class="card">
+        <label class="toggle" style="margin:0"><input type="checkbox" id="obSpaced" ${o.spacing.on ? 'checked' : ''}/> Espaçar os pitches do funil: entre <input id="obMin" class="mini" type="number" min="5" value="${o.spacing.min}"/> e <input id="obMax" class="mini" type="number" min="5" value="${o.spacing.max}"/> segundos, ao acaso</label>
+        <p class="hint" style="margin:8px 0 0">Muitos e-mails seguidos de um domínio novo parecem spam aos filtros. Os envios normais (uma resposta, uma mensagem nova) saem logo.</p>
+      </div>
+      ${pend.length ? `<h2>A enviar (${pend.length})</h2><p class="muted" style="margin-top:0">${o.until ? `Os últimos saem por volta das ${hm(o.until)}. ` : ''}Podes continuar a trabalhar; se fechares a app, continua quando a voltares a abrir.</p>${pend.map(row).join('')}` : ''}
+      ${failed.length ? `<h2>Falharam (${failed.length})</h2><p class="muted" style="margin-top:0">O rascunho continua guardado. Corrige o que for preciso e tenta de novo.</p>${failed.map(row).join('')}` : ''}
+      <h2>Enviados</h2>${done.length ? done.map(row).join('') : '<p class="muted">Ainda nada enviado pela caixa de saída.</p>'}`;
+    const saveSp = async () => { state.outbox = await api('/api/outbox/spacing', { method: 'PUT', body: { on: $('#obSpaced').checked, min: $('#obMin').value, max: $('#obMax').value } }); toast('Guardado'); };
+    $('#obSpaced').onchange = saveSp; $('#obMin').onchange = saveSp; $('#obMax').onchange = saveSp;
+    box.onclick = async (e) => {
+      const b = e.target.closest('[data-ob]'); if (!b) return;
+      try { await api(`/api/outbox/${b.dataset.id}${b.dataset.ob === 'retry' ? '/retry' : ''}`, { method: b.dataset.ob === 'retry' ? 'POST' : 'DELETE' }); await refreshDrafts(); pollOutbox(true); }
+      catch (err) { toast('Erro: ' + err.message); }
+    };
+  }
+
   // ---------- rascunhos ----------
   async function refreshDrafts() { state.drafts = await api('/api/drafts'); highlightNav(); }
   function renderDraftList() {
@@ -943,12 +1022,12 @@ function mount(root, host, base) {
           <span class="dot" style="background:${esc(acc(d.account).color)}"></span>
           <span class="who">Para: ${esc(d.to || '—')}</span><span class="when">${when(d.createdAt)}</span>
           <span class="subj">${esc(d.subject || '(sem assunto)')}</span>
-          <span class="snip">${d.reviewed ? '<span class="tag" style="margin:0 6px 0 0">revisto</span>' : ''}${d.source && d.source !== 'manual' ? `<span class="tag" style="margin:0 6px 0 0">${esc(d.source)}</span>` : ''}${esc((d.text || '').slice(0, 140))}</span></li>`).join('')
+          <span class="snip">${d.queued ? '<span class="tag" style="margin:0 6px 0 0">na caixa de saída</span>' : ''}${d.sendError ? '<span class="tag warn" style="margin:0 6px 0 0">falhou</span>' : ''}${d.reviewed ? '<span class="tag" style="margin:0 6px 0 0">revisto</span>' : ''}${d.source && d.source !== 'manual' ? `<span class="tag" style="margin:0 6px 0 0">${esc(d.source)}</span>` : ''}${esc((d.text || '').slice(0, 140))}</span></li>`).join('')
       : `<li class="list-empty">Sem rascunhos.</li>`;
   }
   const openDraft = (d) => d && compose({ ...d, draftId: d.id });
   function renderDraftsHome() {
-    const reviewed = state.drafts.filter((d) => d.reviewed);
+    const reviewed = state.drafts.filter((d) => d.reviewed && !d.queued);
     $('#reader').innerHTML = `<div class="pane"><h1>Rascunhos</h1>
       <p class="muted">Tudo o que o assistente prepara fica aqui. Nada sai sem tu enviares. Abre cada rascunho, ajusta e marca “Revisto”.</p>
       <div class="actions"><button class="btn primary" id="sendReviewed" ${reviewed.length ? '' : 'disabled'}>Enviar ${reviewed.length} revisto(s)</button></div>
@@ -957,13 +1036,11 @@ function mount(root, host, base) {
       const btn = e.target;
       if (!btn.dataset.armed) { btn.dataset.armed = 1; btn.textContent = `Confirmar: enviar ${reviewed.length} e-mail(s) agora`; return; }
       btn.disabled = true;
-      const log = $('#batchLog'); log.hidden = false;
-      for (const d of reviewed) {
-        try { await api('/api/send', { method: 'POST', body: { ...d, draftId: d.id } }); log.insertAdjacentHTML('beforeend', `<div>✓ ${esc(d.to)} — ${esc(d.subject)}</div>`); }
-        catch (err) { log.insertAdjacentHTML('beforeend', `<div>✗ ${esc(d.to)} — ${esc(err.message)}</div>`); }
-        await new Promise((r) => setTimeout(r, 1500));
-      }
-      await refreshDrafts(); renderDraftList(); btn.textContent = 'Concluído';
+      try {
+        const q = await api('/api/outbox', { method: 'POST', body: { drafts: reviewed.map((d) => d.id) } });
+        toast(`${q.queued} e-mail(s) na caixa de saída`);
+        await refreshDrafts(); renderDraftList(); await pollOutbox(true); openView('outbox');
+      } catch (err) { btn.disabled = false; toast('Erro: ' + err.message); }
     };
   }
 
@@ -978,7 +1055,7 @@ function mount(root, host, base) {
     app().classList.add('reading');
     if (view === 'drafts') { renderDraftList(); renderDraftsHome(); return; }
     if (state.mode === 'classic' && !state.items.length) loadList();
-    ({ calendar: viewCalendar, funnel: viewFunnel, triage: viewTriage, pitch: viewPitch, publish: viewPublish, agent: viewAgent, settings: viewSettings })[view]?.();
+    ({ calendar: viewCalendar, outbox: viewOutbox, funnel: viewFunnel, triage: viewTriage, pitch: viewPitch, publish: viewPublish, agent: viewAgent, settings: viewSettings })[view]?.();
   }
 
   async function viewTriage() {
@@ -1132,7 +1209,7 @@ function mount(root, host, base) {
   // =====================================================================
   // Funil de prospeção
   // =====================================================================
-  const STATUS_ORDER = ['respondeu', 'conversa', 'novo', 'contactado', 'followup', 'concluido', 'recusou', 'sem_resposta'];
+  const STATUS_ORDER = ['devolvido', 'respondeu', 'conversa', 'novo', 'contactado', 'followup', 'concluido', 'recusou', 'sem_resposta'];
   const CLOSED = new Set(['concluido', 'recusou', 'sem_resposta']);
   const dayFmt = (d) => new Date(d).toLocaleDateString('pt-PT', { day: 'numeric', month: 'short' });
   const dueLabel = (d) => {
@@ -1345,7 +1422,7 @@ function mount(root, host, base) {
     out.innerHTML = `<div class="review">
       <div class="c-head" style="margin:14px 0 8px"><b style="color:var(--ink)">${ds.length} rascunho(s) por rever</b><span><button class="btn" data-rv="all">Marcar todos como revistos</button> <button class="btn primary" data-rv="send">Enviar revistos</button></span></div>
       ${ds.map((d) => `<div class="card rv" data-did="${esc(d.id)}">
-        <div class="c-head"><span>${d.kind === 'followup' ? 'Follow-up' : 'Pitch'} para <b style="color:var(--ink)">${esc(d.to)}</b>${d.attachments?.length ? ` · 📎 ${d.attachments.length}` : ''}</span>
+        <div class="c-head"><span>${d.kind === 'followup' ? 'Follow-up' : 'Pitch'} para <b style="color:var(--ink)">${esc(d.to)}</b>${d.attachments?.length ? ` · 📎 ${d.attachments.length}` : ''} <span class="sendst" data-sendst></span></span>
           <span><label class="checks" style="display:inline-flex;gap:5px"><input type="checkbox" data-rv="ok" ${d.reviewed ? 'checked' : ''}/> revisto</label> <button class="btn" data-rv="edit">Editar</button> <button class="btn danger" data-rv="del">Descartar</button></span></div>
         <div class="c-title">${esc(d.subject)}</div>
         ${d.note ? `<div class="muted" style="margin-bottom:6px;font-size:13px">${esc(d.note)}</div>` : ''}
@@ -1353,6 +1430,7 @@ function mount(root, host, base) {
       </div>`).join('')}
       <div id="rvLog" class="log" hidden></div>
     </div>`;
+    paintSendStates();
     out.scrollIntoView({ behavior: 'smooth', block: 'start' });
     out.onclick = async (e) => {
       const b = e.target.closest('[data-rv]'); if (!b) return;
@@ -1366,15 +1444,14 @@ function mount(root, host, base) {
         if (!ok.length) return toast('Marca primeiro os rascunhos revistos');
         if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = `Confirmar: enviar ${ok.length} agora`; return; }
         b.disabled = true;
-        const log = $('#rvLog'); log.hidden = false;
-        for (const x of ok) {
-          try { await api('/api/send', { method: 'POST', body: { ...x, draftId: x.id } }); log.insertAdjacentHTML('beforeend', `<div>✓ ${esc(x.to)} — ${esc(x.subject)}</div>`); }
-          catch (err) { log.insertAdjacentHTML('beforeend', `<div>✗ ${esc(x.to)} — ${esc(err.message)}</div>`); }
-          await new Promise((res) => setTimeout(res, 1500));
-        }
-        await refreshDrafts();
-        toast('Envio concluído'); viewFunnel();
+        try {
+          const q = await api('/api/outbox', { method: 'POST', body: { drafts: ok.map((x) => x.id) } });
+          toast(`${q.queued} e-mail(s) na caixa de saída. Podes continuar a trabalhar.`);
+          b.textContent = 'Na caixa de saída'; delete b.dataset.armed;
+          await refreshDrafts(); await pollOutbox(true);
+        } catch (err) { b.disabled = false; b.textContent = 'Enviar revistos'; toast('Erro: ' + err.message); }
       }
+      if (b.dataset.rv === 'retry') { await api(`/api/outbox/${b.dataset.job}/retry`, { method: 'POST' }); await refreshDrafts(); return pollOutbox(true); }
     };
   }
 
@@ -2173,6 +2250,7 @@ function mount(root, host, base) {
     highlightNav();
     emit('mail-ready', { accounts: state.status.accounts, mode: state.mode });
     refreshFunnelCount(); setInterval(refreshFunnelCount, 5 * 60_000);
+    pollOutbox();
     checkUpdate();
   })();
 

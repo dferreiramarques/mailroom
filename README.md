@@ -80,6 +80,17 @@ A conta lê o Gmail por IMAP e filtra pelo destinatário (`"filterTo": "monco.io
 
 Com o Gmail, usa `appendSent: false`. Noutros fornecedores (cPanel, Zoho, Migadu…) usa os dados IMAP/SMTP deles e `appendSent: true`.
 
+## Caixa de saída
+
+Os envios em lote (revisão do funil, rascunhos revistos) vão para a **caixa de saída** e saem pelo servidor do mailroom, em segundo plano:
+
+- A fila fica em `data/outbox.json`. Mudar de ecrã ou fechar a app não perde nada: ao reabrir, continua de onde parou. Sair com envios pendentes pede confirmação, e a atualização automática espera que a fila esvazie.
+- O rascunho só desaparece quando o envio é confirmado. Se falhar (servidor em baixo, destinatário recusado), fica com o motivo e pode tentar-se de novo; falhas de rede tentam outra vez sozinhas (1, 5 e 15 min).
+- Cada envio leva um Message-ID escolhido antes de sair. Se a app parar a meio de um envio, procura-o nos Enviados antes de repetir, para não mandar o mesmo e-mail duas vezes.
+- Os pitches do funil saem pela ordem da revisão, espaçados 20 a 60 s ao acaso (configurável na caixa de saída). Respostas e mensagens novas saem logo.
+
+Avisos de devolução (Mailer-Daemon) depois de um pitch ou follow-up passam o contacto para «Devolvido», com o motivo, e o assistente não sugere respostas a remetentes automáticos.
+
 ## Calendário e projetos
 
 Em **Agenda → Calendário**: vistas de dia, 3 dias, semana (com fim de semana) e mês, e por baixo uma linha do tempo de projetos com milestones (◆) e deadlines (⚑).

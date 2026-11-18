@@ -11,7 +11,7 @@ const { autoUpdater } = electronUpdater;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN = crypto.randomBytes(24).toString('hex');
 const isDev = !app.isPackaged;
-let win = null, tray = null, base = '', quitting = false;
+let win = null, tray = null, base = '', quitting = false, quitConfirmed = false;
 
 if (!app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', () => showWindow());
@@ -54,7 +54,7 @@ const updater = {
     progress = { phase: 'download', percent: 0 };
     try { await autoUpdater.downloadUpdate(); }
     catch (e) { progress = null; throw new Error('O download falhou: ' + e.message); }
-    setTimeout(() => { quitting = true; autoUpdater.quitAndInstall(true, true); }, 1500);
+    setTimeout(() => { quitting = true; quitConfirmed = true; autoUpdater.quitAndInstall(true, true); }, 1500);
     return { ok: true, version: lastUpdate.latest, restart: 'auto' };
   },
 };
@@ -164,6 +164,26 @@ app.whenReady().then(async () => {
   setInterval(pollMail, 3 * 60_000);
 });
 
-app.on('before-quit', () => { quitting = true; });
+// Sair com e-mails na caixa de saída: avisa. A fila está guardada, por isso sair não perde nada; só adia o envio.
+async function pendingSends() {
+  try { const r = await fetch(`${base}/mail/api/outbox`, { headers: { 'x-mailroom-token': TOKEN }, signal: AbortSignal.timeout(3000) }); return (await r.json()).pending || 0; }
+  catch { return 0; }
+}
+app.on('before-quit', async (e) => {
+  quitting = true;
+  if (quitConfirmed || !base) return;
+  e.preventDefault();
+  const n = await pendingSends();
+  if (n) {
+    const { response } = await dialog.showMessageBox(win?.isVisible() ? win : undefined, {
+      type: 'question', title: 'mailroom', buttons: ['Continuar a enviar', 'Sair mesmo assim'], defaultId: 0, cancelId: 0,
+      message: `Há ${n} e-mail(s) na caixa de saída.`,
+      detail: 'Se saíres agora, ficam guardados e o envio continua quando voltares a abrir o mailroom. Se ficares, a app continua a enviar (mesmo com a janela fechada, na área de notificação).',
+    });
+    if (response === 0) { quitting = false; return; }
+  }
+  quitConfirmed = true;
+  app.quit();
+});
 app.on('window-all-closed', () => { if (!tray) app.quit(); });
 app.on('activate', showWindow);

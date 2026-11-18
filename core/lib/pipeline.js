@@ -13,10 +13,20 @@ export const STATUSES = {
   concluido: 'Concluído',
   recusou: 'Recusou',
   sem_resposta: 'Sem resposta',
+  devolvido: 'Devolvido',
 };
 const OPEN = new Set(['novo', 'contactado', 'followup', 'respondeu', 'conversa']);
 const FREE_MAIL = /^(gmail|googlemail|hotmail|outlook|live|yahoo|icloud|me|sapo|aol|proton|protonmail|gmx|mail)\./i;
 const DAY = 864e5;
+// Avisos automáticos de devolução (o e-mail não chegou ao destino).
+const BOUNCE_FROM = /mailer-daemon|postmaster|mail delivery|maildelivery|no-?reply.*bounce/i;
+const BOUNCE_SUBJ = /undeliver|delivery (status|failure|has failed)|failure notice|returned mail|mail delivery failed|não (foi )?entregue|devolvid|rejected|non remis|unzustellbar|no entregado/i;
+function bounceReason(text = '') {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const hit = lines.find((l) => /spam|blocked|reject|denied|not exist|unknown|no such|quota|full|discarded|refused|invalid|5\.\d\.\d/i.test(l) && !/^(final-recipient|original-recipient|reporting-mta|action|status):/i.test(l));
+  const mta = (text.match(/Reporting-MTA:\s*dns;\s*(\S+)/i) || [])[1];
+  return { reason: (hit || '').slice(0, 200), mta: mta || '' };
+}
 
 const now = () => new Date();
 const iso = (d = now()) => new Date(d).toISOString();
@@ -151,6 +161,21 @@ export function createPipeline({ store, io, accById, accs, ai, getSettings, addD
         if (c.status === 'novo') {
           const out = m.sent.filter((x) => (x.to || []).some((t) => t.address?.toLowerCase() === c.email)).sort((a, b) => new Date(a.date) - new Date(b.date))[0];
           if (out) { c.status = 'contactado'; c.firstContactAt = iso(out.date); c.pitch = { subject: out.subject, messageId: out.messageId }; note(c, 'contactado', `Enviado fora da app: “${out.subject}”`); }
+        }
+        // Aviso de devolução depois do envio: o e-mail não chegou
+        if (['contactado', 'followup'].includes(c.status) && c.firstContactAt) {
+          const since = new Date(c.followUpSentAt || c.firstContactAt);
+          const b = m.inbox.find((x) => new Date(x.date) >= since
+            && ((x.from || []).some((f) => BOUNCE_FROM.test(`${f.address} ${f.name || ''}`)) || BOUNCE_SUBJ.test(x.subject || ''))
+            && `${x.subject} ${x.preview || x.snippet || ''}`.toLowerCase().includes(c.email));
+          if (b) {
+            const { reason, mta } = bounceReason(b.preview || b.snippet || '');
+            c.status = 'devolvido';
+            c.bounce = { at: iso(b.date), reason, mta, uid: b.uid, account: s.account };
+            c.nextAction = { text: 'O e-mail não chegou: confirmar o endereço ou mudar o texto e voltar a enviar', due: iso() };
+            note(c, 'devolvido', `Devolvido${reason ? `: ${reason}` : ''}${mta ? ` (servidor ${mta})` : ''}`);
+            continue;
+          }
         }
         // Resposta depois do primeiro contacto
         if (['contactado', 'followup'].includes(c.status) && c.firstContactAt) {
